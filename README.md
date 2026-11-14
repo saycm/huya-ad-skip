@@ -34,7 +34,6 @@
 
 - [最新版本与安装包](https://github.com/saycm/huya-ad-skip/releases)
 - [完整变更记录](CHANGELOG.md)
-- [LSPosed 官方收录仓库](https://github.com/Xposed-Modules-Repo/io.github.saycm.huya.skipad)
 
 ## 版本变动
 
