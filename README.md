@@ -1,6 +1,6 @@
 # 虎牙广告跳过模块
 
-面向 LSPosed 的虎牙广告过滤模块，适配虎牙 **13.5.44**（versionCode `117129`）。模块拦截开屏广告、推荐列表广告和自动推广弹窗；用户点击奖励广告入口时，直接完成虎牙原有的奖励流程。
+面向 LSPosed 的虎牙广告过滤模块，基于 libxposed API 102 开发，适配虎牙 **13.5.44**（versionCode `117129`）。模块拦截开屏广告、推荐列表广告和自动推广弹窗；用户点击奖励广告入口时，直接完成虎牙原有的奖励流程。
 
 ## 功能
 
@@ -15,11 +15,11 @@
 | 项目 | 版本或范围 |
 | --- | --- |
 | 目标应用 | 虎牙 13.5.44，versionCode `117129` |
-| 模块版本 | 1.9，versionCode `10` |
+| 模块版本 | 1.10，versionCode `11` |
 | 模块包名 | `io.github.saycm.huya.skipad` |
 | 作用域 | `com.duowan.kiwi` |
 | Android | Android 10 及以上（API 29+） |
-| 框架 | LSPosed，传统 Xposed API 93+ |
+| 框架 | LSPosed，libxposed API 102 |
 
 ## 安装
 
@@ -28,14 +28,19 @@
 3. 将作用域设置为虎牙 `com.duowan.kiwi`。
 4. 强制停止虎牙并重新打开。
 
-> 1.9 使用新的 Application ID。从 1.8 或更早版本升级时，需要先卸载旧模块，再安装 1.9。
-
 ## 下载与源码
 
 - [最新版本与安装包](https://github.com/saycm/huya-ad-skip/releases)
 - [完整变更记录](CHANGELOG.md)
 
 ## 版本变动
+
+### 1.10
+
+- 模块迁移至 libxposed API 102。
+- 使用 `onPackageReady` 获取虎牙最终 ClassLoader 并安装 Hook。
+- 使用 API 102 拦截链接口重写广告拦截逻辑。
+- 使用 `META-INF/xposed` 模块元数据，移除传统 Xposed 清单声明。
 
 ### 1.9
 
@@ -65,6 +70,7 @@ python tools\build.py
 运行回归测试：
 
 ```powershell
+python tests\test_huya_api102_metadata.py
 python tests\test_huya_loader_lifecycle.py
 python tests\test_huya_display_ads.py
 ```

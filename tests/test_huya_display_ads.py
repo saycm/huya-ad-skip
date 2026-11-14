@@ -10,57 +10,6 @@ from test_huya_loader_lifecycle import JDK, ROOT, SDK, SOURCES
 
 DISPLAY_SOURCES = dict(SOURCES)
 DISPLAY_SOURCES.update({
-    "de/robv/android/xposed/XC_MethodHook.java": """
-package de.robv.android.xposed;
-public abstract class XC_MethodHook {
- protected XC_MethodHook(){}
- protected XC_MethodHook(int priority){}
- protected void beforeHookedMethod(MethodHookParam p) throws Throwable {}
- protected void afterHookedMethod(MethodHookParam p) throws Throwable {}
- public static class MethodHookParam {
-  public Object[] args; public java.lang.reflect.Member method; public Object thisObject;
-  public Object result; public boolean returnEarly;
-  public Object getResult(){return result;}
-  public void setResult(Object result){this.result=result;returnEarly=true;}
-  public Throwable getThrowable(){return null;}
- }
- public static class Unhook {}
-}
-""",
-    "de/robv/android/xposed/XposedBridge.java": """
-package de.robv.android.xposed;
-import java.lang.reflect.*;
-import java.util.*;
-public class XposedBridge {
- static final Map<Member,XC_MethodHook> hooks=new LinkedHashMap<>();
- public static XC_MethodHook.Unhook hookMethod(Member m,XC_MethodHook h){
-  hooks.put(m,h);return null;
- }
- public static void log(String s){}
- public static void log(Throwable t){}
- public static Object invokeOriginalMethod(Member m,Object o,Object[] a) throws Throwable{
-  return ((Method)m).invoke(o,a);
- }
- public static Object call(Object target,String name,Class<?>[] types,Object... args)
-   throws Throwable {
-  Method method=target.getClass().getMethod(name,types);
-  XC_MethodHook hook=hooks.get(method);
-  if(hook==null)return method.invoke(target,args);
-  XC_MethodHook.MethodHookParam p=new XC_MethodHook.MethodHookParam();
-  p.method=method;p.thisObject=target;p.args=args;
-  if(hook instanceof XC_MethodReplacement)
-   return ((XC_MethodReplacement)hook).replaceHookedMethod(p);
-  hook.beforeHookedMethod(p);
-  if(!p.returnEarly)p.result=method.invoke(target,p.args);
-  hook.afterHookedMethod(p);
-  return p.result;
- }
- public static void applicationCreated(android.app.Application app) throws Throwable{
-  call(new android.app.Instrumentation(),"callApplicationOnCreate",
-   new Class<?>[]{android.app.Application.class},app);
- }
-}
-""",
     "com/duowan/kiwi/adsplash/controller/AdRouter.java": """
 package com.duowan.kiwi.adsplash.controller;
 public class AdRouter {
@@ -98,16 +47,21 @@ public class RecommendAdComponent {public static class ViewObject {}}
 """,
     "DisplayAdsTest.java": """
 import java.util.*;
-import android.app.Application;
+import io.github.libxposed.api.XposedModule;
 import io.github.saycm.huya.skipad.HuyaCompatEntry;
 import com.duowan.kiwi.adsplash.controller.AdRouter;
 import com.duowan.kiwi.ad.impl.HyAdModule;
 import com.duowan.kiwi.list.patface.chain.PatFaceInterceptorChain;
 import com.duowan.kiwi.listframe.component.LineItem;
 import com.duowan.kiwi.list.component.RecommendAdComponent;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class DisplayAdsTest {
+ static final class Param implements XposedModule.PackageReadyParam {
+  final ClassLoader loader;
+  Param(ClassLoader loader){this.loader=loader;}
+  public String getPackageName(){return "com.duowan.kiwi";}
+  public boolean isFirstPackage(){return true;}
+  public ClassLoader getClassLoader(){return loader;}
+ }
  public static class Card {
   public int iCardType;
   public List<Object> vAdCard=new ArrayList<>();
@@ -133,14 +87,11 @@ public class DisplayAdsTest {
   if(!condition)throw new AssertionError(message);
  }
  static Object call(Object target,String method,Class<?>[] types,Object... args) throws Throwable{
-  return XposedBridge.call(target,method,types,args);
+  return XposedModule.call(target,method,types,args);
  }
  public static void main(String[] args) throws Throwable {
-  XC_LoadPackage.LoadPackageParam p=new XC_LoadPackage.LoadPackageParam();
-  p.packageName="com.duowan.kiwi";p.processName=p.packageName;
-  p.classLoader=DisplayAdsTest.class.getClassLoader();
-  new HuyaCompatEntry().handleLoadPackage(p);
-  XposedBridge.applicationCreated(new Application(p.classLoader));
+  new HuyaCompatEntry().onPackageReady(
+   new Param(DisplayAdsTest.class.getClassLoader()));
   if(args[0].equals("splash")){
    AdRouter router=new AdRouter();
    for(boolean hot:new boolean[]{false,true})
@@ -229,10 +180,6 @@ class HuyaDisplayAdsTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             sources.append(str(path))
-        sources += [
-            str(path) for path in (ROOT / "tools/xposed-stubs").rglob("*.java")
-            if path.name not in ("XposedBridge.java", "XC_MethodHook.java")
-        ]
         sources.append(str(ROOT / "tools/huya-compat-src/io/github/saycm/huya/skipad/HuyaCompatEntry.java"))
         cls.classpath = os.pathsep.join([
             str(cls.root / "classes"), str(SDK / "platforms/android-36/android.jar")

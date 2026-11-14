@@ -15,13 +15,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.libxposed.api.XposedModule;
 
-public final class HuyaCompatEntry implements IXposedHookLoadPackage {
+public final class HuyaCompatEntry extends XposedModule {
     private static final String TAG = "HuyaMiniappAD";
     private static final String TARGET_PACKAGE = "com.duowan.kiwi";
     private static final String TARGET_CLASS =
@@ -45,25 +41,27 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
     private boolean hooksInitialized;
 
     @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) {
-        if (param == null || !TARGET_PACKAGE.equals(param.packageName)) {
+    public void onModuleLoaded(ModuleLoadedParam param) {
+        logInfo("loaded process=" + param.getProcessName() + " api=" + getApiVersion());
+    }
+
+    @Override
+    public void onPackageReady(PackageReadyParam param) {
+        if (param == null
+                || !TARGET_PACKAGE.equals(param.getPackageName())
+                || !param.isFirstPackage()) {
             return;
         }
 
-        XposedBridge.log(TAG + " waiting for application in " + param.processName);
-        try {
-            Method created = android.app.Instrumentation.class.getDeclaredMethod(
-                    "callApplicationOnCreate", android.app.Application.class);
-            XposedBridge.hookMethod(created, new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam hook) {
-                    // Tinker and Qigsaw replace the loader during attachBaseContext.
-                    initializeHooks(((android.app.Application) hook.args[0]).getClassLoader());
-                }
-            });
-        } catch (Throwable throwable) {
-            XposedBridge.log(throwable);
-        }
+        logInfo("package ready " + param.getPackageName()
+                + " loader=" + param.getClassLoader());
+        initializeHooks(param.getClassLoader());
+    }
+
+    @Override
+    public boolean onHotReloading(HotReloadingParam param) {
+        logInfo("hot reload rejected");
+        return false;
     }
 
     private synchronized void initializeHooks(ClassLoader classLoader) {
@@ -71,7 +69,7 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
             return;
         }
         hooksInitialized = true;
-        XposedBridge.log(TAG + " initializing with application loader " + classLoader);
+        logInfo("initializing with application loader " + classLoader);
         hookMiniappReward(classLoader);
         hookAmsReward(classLoader);
         hookAwardRequests(classLoader);
@@ -81,61 +79,50 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
         hookSplash(classLoader);
     }
 
-    private static void hookDisplayAds(ClassLoader classLoader) {
+    private void hookDisplayAds(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass(
                     "com.duowan.kiwi.adsplash.controller.AdRouter");
             Method route = findMethod(type, "isNeedShowAdSplash", 4);
             if (route != null) {
-                XposedBridge.hookMethod(route, new XC_MethodReplacement(10000) {
-                    @Override
-                    protected Object replaceHookedMethod(MethodHookParam param) {
-                        // 6 is Huya's own "splash disabled" result. The caller still
-                        // completes its normal NO_AD callbacks and opens the homepage.
-                        XposedBridge.log(TAG + " blocked splash before display");
-                        return 6;
-                    }
+                hook(route).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    // 6 is Huya's own "splash disabled" result. The caller still
+                    // completes its normal NO_AD callbacks and opens the homepage.
+                    logInfo("blocked splash before display");
+                    return 6;
                 });
-                XposedBridge.log(TAG + " hooked splash display decision");
+                logInfo("hooked splash display decision");
             }
         } catch (Throwable throwable) {
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
         try {
             Class<?> type = classLoader.loadClass("com.duowan.kiwi.ad.impl.HyAdModule");
             Method shield = findMethod(type, "isNeedShieldAdOutLivingRoom", 0);
             if (shield != null) {
-                XposedBridge.hookMethod(shield, new XC_MethodReplacement(10000) {
-                    @Override
-                    protected Object replaceHookedMethod(MethodHookParam param) {
-                        return true;
-                    }
-                });
+                hook(shield).setPriority(PRIORITY_HIGHEST).intercept(chain -> true);
                 // The in-room shield also guards rewarded-ad requests, so leave it alone.
-                XposedBridge.log(TAG + " enabled ordinary ad request shield");
+                logInfo("enabled ordinary ad request shield");
             }
         } catch (Throwable throwable) {
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
         try {
             Class<?> type = classLoader.loadClass(
                     "com.duowan.kiwi.list.patface.chain.PatFaceInterceptorChain");
             Method proceed = type.getDeclaredMethod("proceed", int.class);
-            XposedBridge.hookMethod(proceed, new XC_MethodReplacement(10000) {
-                @Override
-                protected Object replaceHookedMethod(MethodHookParam param) {
-                    // Stop before constructing or enqueuing the promotional dialog.
-                    XposedBridge.log(TAG + " blocked automatic promotion location=" + param.args[0]);
-                    return false;
-                }
+            hook(proceed).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                // Stop before constructing or enqueuing the promotional dialog.
+                logInfo("blocked automatic promotion location=" + chain.getArg(0));
+                return false;
             });
-            XposedBridge.log(TAG + " hooked automatic promotion decision");
+            logInfo("hooked automatic promotion decision");
         } catch (Throwable throwable) {
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
     }
 
-    private static void hookListAds(ClassLoader classLoader) {
+    private void hookListAds(ClassLoader classLoader) {
         List<String> mutations = Arrays.asList(
                 "replace", "replaceAndNotify", "replaceData", "add", "addAndNotify",
                 "insert", "insertAndNotify", "insertList", "insertListAndNotify",
@@ -158,36 +145,36 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
                             .equals(first.getName())) {
                         continue;
                     }
-                    XposedBridge.hookMethod(method, new XC_MethodHook(10000) {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            Object input = param.args[0];
-                            if (input instanceof List) {
-                                List<?> original = (List<?>) input;
-                                List<Object> filtered = new ArrayList<>(original.size());
-                                for (Object item : original) {
-                                    if (!isAdLineItem(item)) {
-                                        filtered.add(item);
-                                    }
+                    hook(method).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                        Object input = chain.getArg(0);
+                        if (input instanceof List) {
+                            List<?> original = (List<?>) input;
+                            List<Object> filtered = new ArrayList<>(original.size());
+                            for (Object item : original) {
+                                if (!isAdLineItem(item)) {
+                                    filtered.add(item);
                                 }
-                                int removed = original.size() - filtered.size();
-                                if (removed > 0) {
-                                    param.args[0] = filtered;
-                                    XposedBridge.log(TAG + " filtered " + removed
-                                            + " list ads via " + param.method.getName());
-                                }
-                            } else if (isAdLineItem(input)) {
-                                // Skip the notification as well as the insertion.
-                                param.setResult(null);
-                                XposedBridge.log(TAG + " blocked single list ad");
                             }
+                            int removed = original.size() - filtered.size();
+                            if (removed > 0) {
+                                Object[] args = chain.getArgs().toArray();
+                                args[0] = filtered;
+                                logInfo("filtered " + removed
+                                        + " list ads via " + chain.getExecutable().getName());
+                                return chain.proceed(args);
+                            }
+                        } else if (isAdLineItem(input)) {
+                            // Skip the notification as well as the insertion.
+                            logInfo("blocked single list ad");
+                            return null;
                         }
+                        return chain.proceed();
                     });
                     count++;
                 }
-                XposedBridge.log(TAG + " hooked " + name + " mutations=" + count);
+                logInfo("hooked " + name + " mutations=" + count);
             } catch (Throwable throwable) {
-                XposedBridge.log(throwable);
+                logFailure(throwable);
             }
         }
     }
@@ -227,51 +214,45 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
         }
     }
 
-    private static void hookAdRequestDiagnostics(ClassLoader classLoader) {
+    private void hookAdRequestDiagnostics(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass("com.duowan.biz.videoad.impl.HyVideoAdModule");
             for (Method method : type.getDeclaredMethods()) {
                 if ("goVideoAdWithCallback".equals(method.getName())
                         || "lambda$onGetAdFail$2".equals(method.getName())) {
-                    XposedBridge.hookMethod(method, new XC_MethodHook(10000) {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + " request entry " + param.method.getName());
-                        }
+                    hook(method).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                        logInfo("request entry " + chain.getExecutable().getName());
+                        return chain.proceed();
                     });
                 }
             }
             Method failed = findMethod(type, "onGetAdFail", 8);
             if (failed != null) {
-                XposedBridge.hookMethod(failed, new XC_MethodHook(10000) {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + " ad request failed: code=" + param.args[5]
-                                + " reason=" + shortString(param.args[6])
-                                + " scene=" + shortString(param.args[2])
-                                + " " + mapSummary(param.args[7]));
-                    }
+                hook(failed).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    logInfo("ad request failed: code=" + chain.getArg(5)
+                            + " reason=" + shortString(chain.getArg(6))
+                            + " scene=" + shortString(chain.getArg(2))
+                            + " " + mapSummary(chain.getArg(7)));
+                    return chain.proceed();
                 });
             }
             Method parsed = findMethod(type, "parseAdResult", 12);
             if (parsed != null) {
-                XposedBridge.hookMethod(parsed, new XC_MethodHook(10000) {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + " parseAdResult: ad="
-                                + field(param.args[3], "id")
-                                + " taskResult=" + field(param.args[4], "iRet")
-                                + " " + mapSummary(param.args[11]));
-                    }
+                hook(parsed).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    logInfo("parseAdResult: ad="
+                            + field(chain.getArg(3), "id")
+                            + " taskResult=" + field(chain.getArg(4), "iRet")
+                            + " " + mapSummary(chain.getArg(11)));
+                    return chain.proceed();
                 });
             }
-            XposedBridge.log(TAG + " ad request diagnostics installed");
+            logInfo("ad request diagnostics installed");
         } catch (Throwable throwable) {
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
     }
 
-    private static void hookMiniappReward(ClassLoader classLoader) {
+    private void hookMiniappReward(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass(TARGET_CLASS);
             Method show = findMethod(type, "showRewardedVideoAd", 2);
@@ -280,37 +261,28 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
                 return;
             }
 
-            XposedBridge.hookMethod(show, new XC_MethodReplacement(10000) {
-                @Override
-                protected Object replaceHookedMethod(MethodHookParam hookParam) throws Throwable {
-                    if (hookParam.args.length < 2) {
-                        return XposedBridge.invokeOriginalMethod(
-                                hookParam.method, hookParam.thisObject, hookParam.args);
-                    }
-
-                    String adId = readAdId(hookParam.args[0]);
-                    if (adId == null || adId.isEmpty()) {
-                        return XposedBridge.invokeOriginalMethod(
-                                hookParam.method, hookParam.thisObject, hookParam.args);
-                    }
-
-                    final Object callback = hookParam.args[1];
-                    final Object module = hookParam.thisObject;
-                    callSuccess(callback);
-                    getMainHandler().postDelayed(
-                            () -> emitRewardClosed(module, adId), 100L);
-                    Log.i(TAG, "skipped rewarded video " + adId);
-                    return null;
+            hook(show).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                String adId = readAdId(chain.getArg(0));
+                if (adId == null || adId.isEmpty()) {
+                    return chain.proceed();
                 }
+
+                Object callback = chain.getArg(1);
+                Object module = chain.getThisObject();
+                callSuccess(callback);
+                getMainHandler().postDelayed(
+                        () -> emitRewardClosed(module, adId), 100L);
+                Log.i(TAG, "skipped rewarded video " + adId);
+                return null;
             });
             Log.i(TAG, "hooked " + TARGET_CLASS + ".showRewardedVideoAd/2");
         } catch (Throwable throwable) {
             Log.w(TAG, "init failed", throwable);
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
     }
 
-    private static void hookAmsReward(ClassLoader classLoader) {
+    private void hookAmsReward(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass(AMS_HELPER_CLASS);
             Method request = findMethod(type, "onCallAmsRewardAd", 6);
@@ -319,41 +291,36 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
                 return;
             }
 
-            XposedBridge.hookMethod(request, new XC_MethodReplacement(10000) {
-                @Override
-                protected Object replaceHookedMethod(MethodHookParam hookParam) throws Throwable {
-                    if (hookParam.args.length < 6 || hookParam.args[4] == null) {
-                        return XposedBridge.invokeOriginalMethod(
-                                hookParam.method, hookParam.thisObject, hookParam.args);
-                    }
-
-                    Object listener = hookParam.args[4];
-                    int requestId = AMS_REQUESTS.incrementAndGet();
-                    XposedBridge.log(TAG + " intercepted AMS reward request #" + requestId);
-                    Log.i(TAG, "AMS request #" + requestId + " " + summarizeAmsArgs(hookParam.args));
-                    finishAmsReward(listener, requestId);
-                    Log.i(TAG, "skipped AMS rewarded video on user click #" + requestId);
-                    return null;
+            hook(request).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object[] args = chain.getArgs().toArray();
+                if (args.length < 6 || args[4] == null) {
+                    return chain.proceed();
                 }
+
+                Object listener = args[4];
+                int requestId = AMS_REQUESTS.incrementAndGet();
+                logInfo("intercepted AMS reward request #" + requestId);
+                Log.i(TAG, "AMS request #" + requestId + " " + summarizeAmsArgs(args));
+                finishAmsReward(listener, requestId);
+                Log.i(TAG, "skipped AMS rewarded video on user click #" + requestId);
+                return null;
             });
-            XposedBridge.log(TAG + " hooked " + AMS_HELPER_CLASS + ".onCallAmsRewardAd/6");
+            logInfo("hooked " + AMS_HELPER_CLASS + ".onCallAmsRewardAd/6");
         } catch (Throwable throwable) {
             Log.w(TAG, "AMS init failed", throwable);
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
     }
 
-    private static void hookAwardRequests(ClassLoader classLoader) {
+    private void hookAwardRequests(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass(AWARD_MANAGER_CLASS);
             Method award = findMethod(type, "awardAdTaskIfNeed", 6);
             if (award != null) {
-                XposedBridge.hookMethod(award, new XC_MethodHook(10000) {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam hookParam) {
-                        Log.i(TAG, "awardAdTaskIfNeed #" + AWARD_CALLS.incrementAndGet()
-                                + " " + summarizeAwardArgs(hookParam.args));
-                    }
+                hook(award).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    Log.i(TAG, "awardAdTaskIfNeed #" + AWARD_CALLS.incrementAndGet()
+                            + " " + summarizeAwardArgs(chain.getArgs().toArray()));
+                    return chain.proceed();
                 });
             } else {
                 Log.w(TAG, "awardAdTaskIfNeed/6 not found");
@@ -364,26 +331,24 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
             Log.i(TAG, "hooked reward accounting in " + AWARD_MANAGER_CLASS);
         } catch (Throwable throwable) {
             Log.w(TAG, "award diagnostics init failed", throwable);
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
     }
 
-    private static void hookAwardMethod(Class<?> type, String name, int parameterCount) {
+    private void hookAwardMethod(Class<?> type, String name, int parameterCount) {
         Method method = findMethod(type, name, parameterCount);
         if (method == null) {
             Log.w(TAG, "award method not found " + name + "/" + parameterCount);
             return;
         }
-        XposedBridge.hookMethod(method, new XC_MethodHook(10000) {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam hookParam) {
-                Log.i(TAG, name + " #" + AWARD_CALLS.incrementAndGet()
-                        + " " + summarizeAwardArgs(hookParam.args));
-            }
+        hook(method).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+            Log.i(TAG, name + " #" + AWARD_CALLS.incrementAndGet()
+                    + " " + summarizeAwardArgs(chain.getArgs().toArray()));
+            return chain.proceed();
         });
     }
 
-    private static void hookSplash(ClassLoader classLoader) {
+    private void hookSplash(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass(AD_SPLASH_FRAGMENT_CLASS);
             Method visible = findMethod(type, "onVisibleToUser", 0);
@@ -392,26 +357,26 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
                 return;
             }
 
-            XposedBridge.hookMethod(visible, new XC_MethodHook(10000) {
-                @Override
-                protected void afterHookedMethod(MethodHookParam hookParam) throws Throwable {
-                    if (hookParam.thisObject == null || hookParam.getThrowable() != null) {
-                        return;
-                    }
-                    try {
-                        Method dismiss = hookParam.thisObject.getClass().getMethod(
-                                "dismissWhenError", String.class);
-                        dismiss.invoke(hookParam.thisObject, "module_skip_splash");
-                        Log.i(TAG, "skipped splash ad");
-                    } catch (Throwable throwable) {
-                        Log.w(TAG, "splash dismiss failed", throwable);
-                    }
+            hook(visible).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object result = chain.proceed();
+                Object fragment = chain.getThisObject();
+                if (fragment == null) {
+                    return result;
                 }
+                try {
+                    Method dismiss = fragment.getClass().getMethod(
+                            "dismissWhenError", String.class);
+                    dismiss.invoke(fragment, "module_skip_splash");
+                    Log.i(TAG, "skipped splash ad");
+                } catch (Throwable throwable) {
+                    Log.w(TAG, "splash dismiss failed", throwable);
+                }
+                return result;
             });
             Log.i(TAG, "hooked " + AD_SPLASH_FRAGMENT_CLASS + ".onVisibleToUser/0");
         } catch (Throwable throwable) {
             Log.w(TAG, "splash init failed", throwable);
-            XposedBridge.log(throwable);
+            logFailure(throwable);
         }
     }
 
@@ -432,7 +397,6 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
             invokeListener(listener, "onReward", new Class<?>[]{resultType}, rewardResult);
         } catch (Throwable throwable) {
             Log.w(TAG, "AMS reward callback failed", throwable);
-            XposedBridge.log(throwable);
         }
 
         getMainHandler().postDelayed(() -> {
@@ -449,7 +413,6 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
             method.invoke(listener, args);
         } catch (Throwable throwable) {
             Log.w(TAG, "listener " + methodName + " failed", throwable);
-            XposedBridge.log(throwable);
         }
     }
 
@@ -590,6 +553,14 @@ public final class HuyaCompatEntry implements IXposedHookLoadPackage {
         }
         String text = String.valueOf(value);
         return text.length() <= 240 ? text : text.substring(0, 240) + "...";
+    }
+
+    private void logInfo(String message) {
+        log(Log.INFO, TAG, message);
+    }
+
+    private void logFailure(Throwable throwable) {
+        log(Log.ERROR, TAG, "hook failure", throwable);
     }
 
     private static synchronized Handler getMainHandler() {

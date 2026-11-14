@@ -1,5 +1,15 @@
 # 变更记录
 
+## 1.10
+
+### 变更
+
+- 模块迁移至 libxposed API 102。
+- 使用 `onPackageReady` 获取虎牙最终 ClassLoader，并保证同一进程只初始化一次。
+- 所有 Hook 迁移至 API 102 拦截链。
+- 使用 `META-INF/xposed` 模块元数据，移除传统 Xposed 清单声明。
+- 模块版本更新为 1.10，versionCode `11`。
+
 ## 1.9
 
 ### 变更

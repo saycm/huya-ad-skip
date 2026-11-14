@@ -43,22 +43,36 @@ def main() -> None:
     with zipfile.ZipFile(args.module) as apk:
         names = set(apk.namelist())
         assert "classes.dex" in names
-        assert apk.read("assets/xposed_init").decode("ascii").splitlines() == [ENTRY]
+        assert "assets/xposed_init" not in names
+        assert apk.read("META-INF/xposed/java_init.list").decode("utf-8").splitlines() == [ENTRY]
+        assert apk.read("META-INF/xposed/scope.list").decode("utf-8").splitlines() == [
+            "com.duowan.kiwi"
+        ]
+        module_prop = {}
+        for line in apk.read("META-INF/xposed/module.prop").decode("utf-8").splitlines():
+            if line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                module_prop[key] = value
+        assert module_prop["minApiVersion"] == "102"
+        assert module_prop["targetApiVersion"] == "102"
+        assert module_prop["staticScope"] == "true"
 
     manifest = run(str(AAPT2), "dump", "xmltree", "--file", "AndroidManifest.xml", str(args.module))
     assert 'package="io.github.saycm.huya.skipad"' in manifest
-    assert '"xposedmodule"' in manifest
-    assert 'true' in manifest
-
-    resources = run(str(AAPT2), "dump", "resources", str(args.module))
-    assert '"com.duowan.kiwi"' in resources
+    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "11"
+    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.10"
+    assert "xposedmodule" not in manifest
+    assert "xposedminversion" not in manifest
 
     defined = run(str(APKANALYZER), "dex", "packages", "--defined-only", str(args.module))
     assert ENTRY.replace(".", "/") in defined or "io.github.saycm.huya.skipad" in defined
     assert not re.search(r"^C\s+d\s+.*\tde\.robv\.android\.xposed", defined, re.MULTILINE), \
-        "module bundles Xposed API classes"
+        "module contains legacy Xposed classes"
+    assert not re.search(r"^C\s+d\s+.*\tio\.github\.libxposed\.api", defined, re.MULTILINE), \
+        "module bundles compile-only libxposed API classes"
 
     entry_code = run(str(APKANALYZER), "dex", "code", "--class", ENTRY, str(args.module))
+    assert ".super Lio/github/libxposed/api/XposedModule;" in entry_code
     for expected in (
         '"com.duowan.kiwi"',
         '"com.huya.kiwi.hyext.impl.modules.internal.HyExtAd"',
@@ -86,21 +100,12 @@ def main() -> None:
         '"com.duowan.kiwi.listframe.adapter.ListLineRecyclerViewAdapter"',
         '"com.duowan.kiwi.listline.ListLineAdapter"',
         '"com.duowan.kiwi.list.patface.chain.PatFaceInterceptorChain"',
+        ".method public onPackageReady(",
     ):
         assert expected in entry_code, f"compat DEX is missing {expected}"
 
-    splash_factory = re.search(
-        r"\.method private static hookSplash\b.*?\.end method", entry_code, re.DOTALL
-    )
-    assert splash_factory, "splash hook registration not found"
-    splash_class = re.search(r"new-instance \w+, L([^;]+\$\d+);", splash_factory.group())
-    assert splash_class, "splash callback class not found"
-    splash_hook_code = run(
-        str(APKANALYZER), "dex", "code", "--class",
-        splash_class.group(1).replace("/", "."), str(args.module)
-    )
     for expected in ('"dismissWhenError"', '"module_skip_splash"'):
-        assert expected in splash_hook_code, f"splash hook DEX is missing {expected}"
+        assert expected in entry_code, f"splash hook DEX is missing {expected}"
 
     target_code = run(str(APKANALYZER), "dex", "code", "--class", TARGET_CLASS, str(args.target))
     assert (

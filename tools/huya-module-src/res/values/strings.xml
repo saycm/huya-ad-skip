@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">HuyaMiniappAD</string>
-    <string-array name="module_scope">
-        <item>com.duowan.kiwi</item>
-    </string-array>
+    <string name="app_description">虎牙开屏、列表广告过滤及奖励广告跳过</string>
 </resources>
