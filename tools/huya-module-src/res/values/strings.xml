@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HuyaMiniappAD</string>
+    <string-array name="module_scope">
+        <item>com.duowan.kiwi</item>
+    </string-array>
+</resources>

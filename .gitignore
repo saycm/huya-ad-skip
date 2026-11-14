@@ -1,0 +1,9 @@
+build/
+*.apk
+*.idsig
+*.jks
+*.keystore
+__pycache__/
+*.pyc
+.idea/
+*.iml
