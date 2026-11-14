@@ -39,6 +39,7 @@ public final class HuyaCompatEntry extends XposedModule {
 
     private static Handler mainHandler;
     private boolean hooksInitialized;
+    private boolean activityLoaderHookInstalled;
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
@@ -53,9 +54,8 @@ public final class HuyaCompatEntry extends XposedModule {
             return;
         }
 
-        logInfo("package ready " + param.getPackageName()
-                + " loader=" + param.getClassLoader());
-        initializeHooks(param.getClassLoader());
+        logInfo("package ready " + param.getPackageName());
+        installActivityLoaderHook(param.getClassLoader());
     }
 
     @Override
@@ -64,19 +64,119 @@ public final class HuyaCompatEntry extends XposedModule {
         return false;
     }
 
+    private synchronized void installActivityLoaderHook(ClassLoader classLoader) {
+        if (activityLoaderHookInstalled) {
+            return;
+        }
+        try {
+            Class<?> type = classLoader.loadClass("android.app.Activity");
+            Method onCreate = type.getDeclaredMethod("onCreate", android.os.Bundle.class);
+            hook(onCreate).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object activity = chain.getThisObject();
+                ClassLoader activityLoader = activity == null
+                        ? null : activity.getClass().getClassLoader();
+                initializeHooks(activityLoader);
+                return chain.proceed();
+            });
+            activityLoaderHookInstalled = true;
+            logInfo("hooked activity ClassLoader initialization");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+    }
+
     private synchronized void initializeHooks(ClassLoader classLoader) {
-        if (hooksInitialized) {
+        if (hooksInitialized || classLoader == null) {
             return;
         }
         hooksInitialized = true;
-        logInfo("initializing with application loader " + classLoader);
+        logInfo("initializing with activity loader " + classLoader);
         hookMiniappReward(classLoader);
         hookAmsReward(classLoader);
         hookAwardRequests(classLoader);
         hookAdRequestDiagnostics(classLoader);
         hookDisplayAds(classLoader);
+        hookImmerseFeedAds(classLoader);
         hookListAds(classLoader);
         hookSplash(classLoader);
+    }
+
+    private void hookImmerseFeedAds(ClassLoader classLoader) {
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.immersepage.impl.data.ImmerseDataManagerImpl");
+            Method filterList = findMethod(type, "filterList", 3);
+            if (filterList == null) {
+                return;
+            }
+            hook(filterList).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object result = chain.proceed();
+                if (!(result instanceof List)) {
+                    return result;
+                }
+                List<?> original = (List<?>) result;
+                List<Object> filtered = new ArrayList<>(original.size());
+                for (Object item : original) {
+                    if (!isImmerseAdItem(item)) {
+                        filtered.add(item);
+                    }
+                }
+                int removed = original.size() - filtered.size();
+                if (removed > 0) {
+                    logInfo("filtered " + removed + " immersive feed ads");
+                    return filtered;
+                }
+                return result;
+            });
+            logInfo("hooked immersive recommendation feed ads");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.list.homepage.tab.recommend.BaseRecommendPresenter");
+            Method gridItems = findMethod(type, "getGridGameCardItemList", 3);
+            if (gridItems != null) {
+                hook(gridItems).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    Object result = chain.proceed();
+                    if (!(result instanceof List)) {
+                        return result;
+                    }
+                    List<?> original = (List<?>) result;
+                    List<Object> filtered = new ArrayList<>(original.size());
+                    for (Object item : original) {
+                        if (!isAdLineItem(item)) {
+                            filtered.add(item);
+                        }
+                    }
+                    int removed = original.size() - filtered.size();
+                    if (removed > 0) {
+                        logInfo("filtered " + removed + " recommendation grid ads");
+                        return filtered;
+                    }
+                    return result;
+                });
+                logInfo("hooked recommendation grid ads");
+            }
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+    }
+
+    private static boolean isImmerseAdItem(Object item) {
+        if (item == null) {
+            return false;
+        }
+        try {
+            Object itemType = item.getClass().getMethod("getItemType").invoke(item);
+            String name = String.valueOf(itemType);
+            return "AD_VIDEO".equals(name)
+                    || "HOME_NATIVE_AD".equals(name)
+                    || "HOT_LIVE_AD_VIDEO".equals(name)
+                    || "LIVE_LIST_AD_VIDEO".equals(name);
+        } catch (Throwable throwable) {
+            return false;
+        }
     }
 
     private void hookDisplayAds(ClassLoader classLoader) {
@@ -120,6 +220,45 @@ public final class HuyaCompatEntry extends XposedModule {
         } catch (Throwable throwable) {
             logFailure(throwable);
         }
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.list.homepage.tab.recommend.BaseRecommendPresenter");
+            Method callback = findMethod(type, "onLiveListAdBack", 4);
+            if (callback != null) {
+                hook(callback).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    logInfo("blocked recommendation ad injection ad="
+                            + field(chain.getArg(0), "iId"));
+                    return null;
+                });
+                logInfo("hooked recommendation ad injection");
+            }
+            Method insertGrid = findMethod(type, "l0", 3);
+            if (insertGrid != null) {
+                hook(insertGrid).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    Object result = chain.proceed();
+                    Object output = chain.getArg(0);
+                    if (!(output instanceof List)) {
+                        return result;
+                    }
+                    List<?> items = (List<?>) output;
+                    int removed = 0;
+                    for (int index = items.size() - 1; index >= 0; index--) {
+                        if (isAdLineItem(items.get(index))) {
+                            items.remove(index);
+                            removed++;
+                        }
+                    }
+                    if (removed > 0) {
+                        logInfo("filtered " + removed
+                                + " ads after recommendation grid insertion");
+                    }
+                    return result;
+                });
+                logInfo("hooked recommendation grid insertion");
+            }
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
     }
 
     private void hookListAds(ClassLoader classLoader) {
@@ -130,6 +269,7 @@ public final class HuyaCompatEntry extends XposedModule {
                 "insertItemListAndNotify", "insertItemListDataOnly");
         for (String name : new String[]{
                 "com.duowan.kiwi.listframe.adapter.ListLineRecyclerViewAdapter",
+                "com.duowan.kiwi.listframe.adapter.HeaderFooterListLineAdapter",
                 "com.duowan.kiwi.listline.ListLineAdapter"}) {
             try {
                 Class<?> type = classLoader.loadClass(name);

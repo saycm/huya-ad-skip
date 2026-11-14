@@ -59,8 +59,8 @@ def main() -> None:
 
     manifest = run(str(AAPT2), "dump", "xmltree", "--file", "AndroidManifest.xml", str(args.module))
     assert 'package="io.github.saycm.huya.skipad"' in manifest
-    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "11"
-    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.10"
+    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "12"
+    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.11"
     assert "xposedmodule" not in manifest
     assert "xposedminversion" not in manifest
 
@@ -99,7 +99,9 @@ def main() -> None:
         '"isNeedShieldAdOutLivingRoom"',
         '"com.duowan.kiwi.listframe.adapter.ListLineRecyclerViewAdapter"',
         '"com.duowan.kiwi.listline.ListLineAdapter"',
+        '"com.duowan.kiwi.list.homepage.tab.recommend.BaseRecommendPresenter"',
         '"com.duowan.kiwi.list.patface.chain.PatFaceInterceptorChain"',
+        '"onLiveListAdBack"',
         ".method public onPackageReady(",
     ):
         assert expected in entry_code, f"compat DEX is missing {expected}"

@@ -45,6 +45,48 @@ public class LineItem {
 package com.duowan.kiwi.list.component;
 public class RecommendAdComponent {public static class ViewObject {}}
 """,
+    "com/duowan/kiwi/list/homepage/tab/recommend/BaseRecommendPresenter.java": """
+package com.duowan.kiwi.list.homepage.tab.recommend;
+import java.util.*;
+public class BaseRecommendPresenter {
+ public int adCallbacks;
+ public void onLiveListAdBack(Object liveAd,Object localAd,Object map,boolean zh){
+  adCallbacks++;
+ }
+ private List<Object> getGridGameCardItemList(List<Object> prefix,List<?> items,Map<?,?> bigCards){
+  return new ArrayList<>(items);
+ }
+ public void l0(List<Object> output,Object cards,Map<?,?> bigCards){
+  output.addAll((List<?>)cards);
+ }
+}
+""",
+    "com/duowan/kiwi/immersepage/api/data/ImmerseItemType.java": """
+package com.duowan.kiwi.immersepage.api.data;
+public enum ImmerseItemType {
+ AD_VIDEO,COLLECTION_RECOMMEND,FOLLOW_RECOMMEND,HOME_NATIVE_AD,
+ HOT_LIVE_AD_VIDEO,IMMERSE_ACTIVE,LIVE_LIST_AD_VIDEO,
+ RECOMMEND_SINGLE_IMMERSION_LIVE,USER_FAVOR,VIDEO
+}
+""",
+    "com/duowan/kiwi/immersepage/api/data/ImmerseItem.java": """
+package com.duowan.kiwi.immersepage.api.data;
+public class ImmerseItem {
+ private final ImmerseItemType itemType;
+ public ImmerseItem(ImmerseItemType itemType){this.itemType=itemType;}
+ public ImmerseItemType getItemType(){return itemType;}
+}
+""",
+    "com/duowan/kiwi/immersepage/impl/data/ImmerseDataManagerImpl.java": """
+package com.duowan.kiwi.immersepage.impl.data;
+import java.util.*;
+import com.duowan.kiwi.immersepage.api.data.ImmerseItem;
+public class ImmerseDataManagerImpl {
+ private ArrayList filterList(int pageIndex,ArrayList items,boolean fromRefresh){
+  return new ArrayList(items);
+ }
+}
+""",
     "DisplayAdsTest.java": """
 import java.util.*;
 import io.github.libxposed.api.XposedModule;
@@ -54,6 +96,10 @@ import com.duowan.kiwi.ad.impl.HyAdModule;
 import com.duowan.kiwi.list.patface.chain.PatFaceInterceptorChain;
 import com.duowan.kiwi.listframe.component.LineItem;
 import com.duowan.kiwi.list.component.RecommendAdComponent;
+import com.duowan.kiwi.list.homepage.tab.recommend.BaseRecommendPresenter;
+import com.duowan.kiwi.immersepage.api.data.ImmerseItem;
+import com.duowan.kiwi.immersepage.api.data.ImmerseItemType;
+import com.duowan.kiwi.immersepage.impl.data.ImmerseDataManagerImpl;
 public class DisplayAdsTest {
  static final class Param implements XposedModule.PackageReadyParam {
   final ClassLoader loader;
@@ -83,15 +129,31 @@ public class DisplayAdsTest {
   grid.userRecItem.tMCard.vAdCard.add(new Object());
   return new LineItem(grid);
  }
+ static LineItem normalLine(){
+  return new LineItem(new Object());
+ }
  static void check(boolean condition,String message){
   if(!condition)throw new AssertionError(message);
  }
  static Object call(Object target,String method,Class<?>[] types,Object... args) throws Throwable{
   return XposedModule.call(target,method,types,args);
  }
+ static final class ActivityChain implements XposedModule.Chain {
+  final Object activity;
+  ActivityChain(Object activity){this.activity=activity;}
+  public java.lang.reflect.Executable getExecutable(){return null;}
+  public Object getThisObject(){return activity;}
+  public List<Object> getArgs(){return Collections.emptyList();}
+  public Object getArg(int index){throw new IndexOutOfBoundsException();}
+  public Object proceed(){return null;}
+  public Object proceed(Object[] args){return null;}
+ }
  public static void main(String[] args) throws Throwable {
   new HuyaCompatEntry().onPackageReady(
    new Param(DisplayAdsTest.class.getClassLoader()));
+  XposedModule.invokeHook(
+   android.app.Activity.class.getDeclaredMethod("onCreate",android.os.Bundle.class),
+   new ActivityChain(new DisplayAdsTest()));
   if(args[0].equals("splash")){
    AdRouter router=new AdRouter();
    for(boolean hot:new boolean[]{false,true})
@@ -109,6 +171,47 @@ public class DisplayAdsTest {
     check(Boolean.FALSE.equals(result),"Automatic promotion must return the no-display result");
    }
    check(chain.queuedDialogs==0,"Promotion must be stopped before adding a dialog to the queue");
+  }else if(args[0].equals("dynamic")){
+   BaseRecommendPresenter presenter=new BaseRecommendPresenter();
+   call(presenter,"onLiveListAdBack",
+    new Class<?>[]{Object.class,Object.class,Object.class,boolean.class},
+    new Object(),new Object(),new Object(),true);
+   check(presenter.adCallbacks==0,
+    "Recommendation ads must be stopped before they are written into existing cards");
+  }else if(args[0].equals("grid")){
+   BaseRecommendPresenter presenter=new BaseRecommendPresenter();
+   LineItem first=normalLine(),last=normalLine();
+   ArrayList<LineItem> input=new ArrayList<>(Arrays.asList(first,nativeAd(),last));
+   List<?> result=(List<?>)call(presenter,"getGridGameCardItemList",
+    new Class<?>[]{List.class,List.class,Map.class},
+    new ArrayList<>(),input,new HashMap<>());
+   check(result.equals(Arrays.asList(first,last)),
+    "Grid recommendation ads must be removed before list insertion: "+result.size());
+   check(input.size()==3,"Caller-owned grid rows must stay unchanged");
+  }else if(args[0].equals("grid-insert")){
+   BaseRecommendPresenter presenter=new BaseRecommendPresenter();
+   LineItem first=normalLine(),last=normalLine();
+   ArrayList<LineItem> output=new ArrayList<>();
+   output.add(first);
+   call(presenter,"l0",new Class<?>[]{List.class,Object.class,Map.class},
+    output,new ArrayList<>(Arrays.asList(nativeAd(),last)),new HashMap<>());
+   check(output.equals(Arrays.asList(first,last)),
+    "Grid ads must be removed after either recommendation build path: "+output.size());
+  }else if(args[0].equals("immerse")){
+   ImmerseItem normal=new ImmerseItem(ImmerseItemType.VIDEO);
+   ImmerseItem recommendLive=new ImmerseItem(
+    ImmerseItemType.RECOMMEND_SINGLE_IMMERSION_LIVE);
+   ArrayList<ImmerseItem> input=new ArrayList<>(Arrays.asList(
+    normal,new ImmerseItem(ImmerseItemType.AD_VIDEO),
+    recommendLive,new ImmerseItem(ImmerseItemType.HOME_NATIVE_AD),
+    new ImmerseItem(ImmerseItemType.HOT_LIVE_AD_VIDEO),
+    new ImmerseItem(ImmerseItemType.LIVE_LIST_AD_VIDEO)));
+   ImmerseDataManagerImpl manager=new ImmerseDataManagerImpl();
+   List<?> result=(List<?>)call(manager,"filterList",
+    new Class<?>[]{int.class,ArrayList.class,boolean.class},0,input,false);
+   check(result.equals(Arrays.asList(normal,recommendLive)),
+    "Immersive feed ads must be removed while normal items keep their order: "+result.size());
+   check(input.size()==6,"Caller-owned feed data must stay unchanged");
   }else if(args[0].equals("batch")){
    Object adapter=Class.forName(args[1]).getConstructor().newInstance();
    LineItem first=new LineItem(new Object()),last=new LineItem(new Object());
@@ -148,6 +251,8 @@ public class DisplayAdsTest {
 
 for package, name, methods in (
     ("com.duowan.kiwi.listframe.adapter", "ListLineRecyclerViewAdapter",
+     ("replace", "replaceAndNotify", "insert", "insertAndNotify")),
+    ("com.duowan.kiwi.listframe.adapter", "HeaderFooterListLineAdapter",
      ("replace", "replaceAndNotify", "insert", "insertAndNotify")),
     ("com.duowan.kiwi.listline", "ListLineAdapter",
      ("replaceData", "replaceAndNotify", "insertItemDataOnly", "insertItemAndNotify")),
@@ -208,9 +313,23 @@ class HuyaDisplayAdsTest(unittest.TestCase):
     def test_automatic_promotion_stops_before_queuing_a_dialog(self):
         self.run_case("promotion")
 
+    def test_recommendation_ads_stop_before_dynamic_card_injection(self):
+        self.run_case("dynamic")
+
+    def test_grid_recommendation_ads_are_removed_before_list_insertion(self):
+        self.run_case("grid")
+
+    def test_grid_recommendation_ads_are_removed_after_unified_insertion(self):
+        self.run_case("grid-insert")
+
+    def test_recommendation_feed_removes_all_immersive_ad_item_types(self):
+        self.run_case("immerse")
+
     def test_both_list_adapters_filter_ads_without_changing_the_input(self):
         for adapter, methods in (
             ("com.duowan.kiwi.listframe.adapter.ListLineRecyclerViewAdapter",
+             ("replace", "replaceAndNotify")),
+            ("com.duowan.kiwi.listframe.adapter.HeaderFooterListLineAdapter",
              ("replace", "replaceAndNotify")),
             ("com.duowan.kiwi.listline.ListLineAdapter",
              ("replaceData", "replaceAndNotify")),
@@ -222,6 +341,8 @@ class HuyaDisplayAdsTest(unittest.TestCase):
     def test_single_ad_insertion_does_not_send_item_notifications(self):
         for adapter, methods in (
             ("com.duowan.kiwi.listframe.adapter.ListLineRecyclerViewAdapter",
+             ("insert", "insertAndNotify")),
+            ("com.duowan.kiwi.listframe.adapter.HeaderFooterListLineAdapter",
              ("insert", "insertAndNotify")),
             ("com.duowan.kiwi.listline.ListLineAdapter",
              ("insertItemDataOnly", "insertItemAndNotify")),

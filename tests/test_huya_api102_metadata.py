@@ -47,8 +47,8 @@ class HuyaApi102MetadataTest(unittest.TestCase):
         self.assertNotIn('"xposedminversion"', manifest)
         self.assertNotIn('"xposedscope"', manifest)
         self.assertIn('android:description="@string/app_description"', manifest)
-        self.assertIn('android:versionCode="11"', manifest)
-        self.assertIn('android:versionName="1.10"', manifest)
+        self.assertIn('android:versionCode="12"', manifest)
+        self.assertIn('android:versionName="1.11"', manifest)
 
     def test_entry_compiles_against_api_102_only(self):
         self.assertTrue(API_AAR.is_file(), f"missing API fixture: {API_AAR}")

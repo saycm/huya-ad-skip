@@ -15,7 +15,7 @@
 | 项目 | 版本或范围 |
 | --- | --- |
 | 目标应用 | 虎牙 13.5.44，versionCode `117129` |
-| 模块版本 | 1.10，versionCode `11` |
+| 模块版本 | 1.11，versionCode `12` |
 | 模块包名 | `io.github.saycm.huya.skipad` |
 | 作用域 | `com.duowan.kiwi` |
 | Android | Android 10 及以上（API 29+） |
@@ -34,6 +34,12 @@
 - [完整变更记录](CHANGELOG.md)
 
 ## 版本变动
+
+### 1.11
+
+- 拦截推荐页广告的动态卡片回填路径，避免广告在列表创建后写回普通卡片。
+- 补充沉浸式推荐页及带页头页尾列表的广告过滤。
+- 从首个 Activity 获取虎牙动态补丁后的 ClassLoader 并安装业务 Hook，修复 API 102 版本中 Hook 安装成功但未命中业务类的问题。
 
 ### 1.10
 

@@ -1,4 +1,4 @@
-"""Exercise the API 102 package-ready lifecycle against the real module entry."""
+"""Exercise the API 102 dynamic ClassLoader lifecycle against the real module entry."""
 import os
 from pathlib import Path
 import subprocess
@@ -81,10 +81,20 @@ public abstract class XposedModule {
  }
  public static Object call(Object target,String name,Class<?>[] types,Object...args)
    throws Throwable {
-  Method method=target.getClass().getMethod(name,types);
+  Method method;
+  try {
+   method=target.getClass().getMethod(name,types);
+  }catch(NoSuchMethodException exception){
+   method=target.getClass().getDeclaredMethod(name,types);
+  }
   Hooker hooker=hooks.get(method);
   if(hooker==null)return invoke(method,target,args);
   return hooker.intercept(new TestChain(method,target,args));
+ }
+ public static Object invokeHook(Executable origin,Chain chain) throws Throwable {
+  Hooker hooker=hooks.get(origin);
+  if(hooker==null)throw new AssertionError("Hook not installed: "+origin);
+  return hooker.intercept(chain);
  }
  static Object invoke(Method method,Object target,Object[] args) throws Throwable {
   method.setAccessible(true);
@@ -113,6 +123,8 @@ public abstract class XposedModule {
 }
 """,
     "LoaderLifecycleTest.java": """
+import java.io.*;
+import java.net.*;
 import java.util.*;
 import io.github.libxposed.api.XposedModule;
 import io.github.saycm.huya.skipad.HuyaCompatEntry;
@@ -120,6 +132,32 @@ public class LoaderLifecycleTest {
  static final class Recorder extends ClassLoader {
   final List<String> requests=new ArrayList<>();
   public Class<?> loadClass(String name) throws ClassNotFoundException {
+   if("android.app.Activity".equals(name))return android.app.Activity.class;
+   requests.add(name);
+   throw new ClassNotFoundException(name);
+  }
+ }
+ static final class ActivityLoader extends ClassLoader {
+  final List<String> requests=new ArrayList<>();
+  ActivityLoader(){super(LoaderLifecycleTest.class.getClassLoader());}
+  public Class<?> loadClass(String name) throws ClassNotFoundException {
+   if("LoaderActivity".equals(name)){
+    Class<?> loaded=findLoadedClass(name);
+    if(loaded!=null)return loaded;
+    try(InputStream input=LoaderLifecycleTest.class.getResourceAsStream("/LoaderActivity.class")){
+     if(input==null)throw new ClassNotFoundException(name);
+     ByteArrayOutputStream output=new ByteArrayOutputStream();
+     byte[] buffer=new byte[4096];
+     for(int count;(count=input.read(buffer))!=-1;)output.write(buffer,0,count);
+     byte[] bytes=output.toByteArray();
+     return defineClass(name,bytes,0,bytes.length);
+    }catch(IOException exception){
+     throw new ClassNotFoundException(name,exception);
+    }
+   }
+   if(name.startsWith("android.")||name.startsWith("java.")||name.startsWith("io.github.libxposed.")){
+    return super.loadClass(name);
+   }
    requests.add(name);
    throw new ClassNotFoundException(name);
   }
@@ -141,30 +179,61 @@ public class LoaderLifecycleTest {
 
   Recorder target=new Recorder();
   entry.onPackageReady(new Param("com.duowan.kiwi",target));
-  for(String name:new String[]{
-   "com.huya.kiwi.hyext.impl.modules.internal.HyExtAd",
-   "com.duowan.kiwi.ad.helper.AmsAdHelper",
-   "com.duowan.kiwi.adsplash.view.AdSplashFragment"})
-   if(!target.requests.contains(name))
-    throw new AssertionError("Package-ready loader was not used for "+name);
+  if(!target.requests.isEmpty())
+   throw new AssertionError("Package-ready loader initialized business hooks: "+target.requests);
 
-  int count=target.requests.size();
-  entry.onPackageReady(new Param("com.duowan.kiwi",target));
-  if(target.requests.size()!=count)
-   throw new AssertionError("Hooks installed twice for the same package");
+  try{
+   ActivityLoader activityLoader=new ActivityLoader();
+   Object activity=activityLoader.loadClass("LoaderActivity").getDeclaredConstructor().newInstance();
+   try{
+    XposedModule.invokeHook(
+      android.app.Activity.class.getDeclaredMethod("onCreate",android.os.Bundle.class),
+      new ActivityChain(activity));
+   }catch(Throwable ignored){
+    throw new AssertionError(ignored);
+   }
+   for(String name:new String[]{
+    "com.huya.kiwi.hyext.impl.modules.internal.HyExtAd",
+    "com.duowan.kiwi.ad.helper.AmsAdHelper",
+    "com.duowan.kiwi.adsplash.view.AdSplashFragment"})
+    if(!activityLoader.requests.contains(name))
+     throw new AssertionError("Activity loader was not used for "+name);
+
+   int activityCount=activityLoader.requests.size();
+   entry.onPackageReady(new Param("com.duowan.kiwi",target));
+   if(activityLoader.requests.size()!=activityCount)
+    throw new AssertionError("Hooks installed twice for the same Activity loader");
+  }catch(ReflectiveOperationException exception){
+   throw new AssertionError(exception);
+  }
   if(entry.getApiVersion()!=102)
    throw new AssertionError("Expected libxposed API 102");
   if(entry.onHotReloading(null))
    throw new AssertionError("Unimplemented hot reload must be rejected");
-  System.out.println("PASS: API 102 package-ready lifecycle and duplicate guard");
+  System.out.println("PASS: API 102 activity-loader lifecycle and duplicate guard");
  }
+ static final class ActivityChain implements XposedModule.Chain {
+  final Object activity;
+  ActivityChain(Object activity){this.activity=activity;}
+  public java.lang.reflect.Executable getExecutable(){return null;}
+  public Object getThisObject(){return activity;}
+  public List<Object> getArgs(){return Collections.emptyList();}
+  public Object getArg(int index){throw new IndexOutOfBoundsException();}
+  public Object proceed(){return null;}
+  public Object proceed(Object[] args){return null;}
+ }
+}
+""",
+    "LoaderActivity.java": """
+public final class LoaderActivity {
+ public LoaderActivity(){}
 }
 """,
 }
 
 
 class HuyaLoaderLifecycleTest(unittest.TestCase):
-    def test_package_ready_uses_the_api_102_loader_once(self):
+    def test_first_activity_uses_its_dynamic_loader_once(self):
         with tempfile.TemporaryDirectory(prefix="huya-loader-") as folder:
             root = Path(folder)
             sources = []
