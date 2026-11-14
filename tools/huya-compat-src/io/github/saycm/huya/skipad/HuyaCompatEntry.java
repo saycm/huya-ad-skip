@@ -395,27 +395,40 @@ public final class HuyaCompatEntry extends XposedModule {
     private void hookMiniappReward(ClassLoader classLoader) {
         try {
             Class<?> type = classLoader.loadClass(TARGET_CLASS);
-            Method show = findMethod(type, "showRewardedVideoAd", 2);
-            if (show == null) {
-                Log.w(TAG, "showRewardedVideoAd not found");
-                return;
-            }
-
-            hook(show).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
-                String adId = readAdId(chain.getArg(0));
-                if (adId == null || adId.isEmpty()) {
-                    return chain.proceed();
+            for (String name : new String[]{
+                    "showRewardedVideoAd", "showCustomAd", "openCustomAd"}) {
+                Method show = findMethod(type, name, 2);
+                if (show == null) {
+                    Log.w(TAG, name + " not found");
+                    continue;
                 }
 
-                Object callback = chain.getArg(1);
-                Object module = chain.getThisObject();
-                callSuccess(callback);
-                getMainHandler().postDelayed(
-                        () -> emitRewardClosed(module, adId), 100L);
-                Log.i(TAG, "skipped rewarded video " + adId);
-                return null;
-            });
-            Log.i(TAG, "hooked " + TARGET_CLASS + ".showRewardedVideoAd/2");
+                boolean custom = "openCustomAd".equals(name);
+                boolean banner = "showCustomAd".equals(name);
+                hook(show).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    String adId = readAdId(
+                            chain.getArg(0),
+                            custom || banner ? "customAdId" : "rewardedVideoAdId");
+                    if (adId == null || adId.isEmpty()) {
+                        return chain.proceed();
+                    }
+
+                    Object callback = chain.getArg(1);
+                    if (banner) {
+                        callSuccess(callback);
+                        logInfo("skipped miniapp banner");
+                        return null;
+                    }
+
+                    Object module = chain.getThisObject();
+                    callSuccess(callback);
+                    getMainHandler().postDelayed(
+                            () -> emitMiniappReward(module, adId, custom), 100L);
+                    logInfo("skipped miniapp " + name);
+                    return null;
+                });
+                logInfo("hooked " + TARGET_CLASS + "." + name + "/2");
+            }
         } catch (Throwable throwable) {
             Log.w(TAG, "init failed", throwable);
             logFailure(throwable);
@@ -566,9 +579,13 @@ public final class HuyaCompatEntry extends XposedModule {
         return null;
     }
 
-    private static String readAdId(Object params) {
+    private static String readAdId(Object params, String key) {
+        if (params instanceof Map) {
+            Object value = ((Map<?, ?>) params).get(key);
+            return value instanceof String ? (String) value : null;
+        }
         if (params instanceof JSONObject) {
-            return ((JSONObject) params).optString("rewardedVideoAdId", "");
+            return ((JSONObject) params).optString(key, "");
         }
         if (params == null) {
             return null;
@@ -576,7 +593,7 @@ public final class HuyaCompatEntry extends XposedModule {
         for (String name : new String[]{"optString", "getString", "get"}) {
             try {
                 Method method = params.getClass().getMethod(name, String.class);
-                Object value = method.invoke(params, "rewardedVideoAdId");
+                Object value = method.invoke(params, key);
                 return value == null ? null : value.toString();
             } catch (Throwable ignored) {
                 // Try the next Map/JSON-compatible accessor.
@@ -598,18 +615,19 @@ public final class HuyaCompatEntry extends XposedModule {
         }
     }
 
-    private static void emitRewardClosed(Object module, String adId) {
+    private static void emitMiniappReward(Object module, String adId, boolean custom) {
         if (module == null) {
             return;
         }
         Map<String, Object> data = new HashMap<>();
-        data.put("rewardedVideoAdId", adId);
-        data.put("isEnded", Boolean.TRUE);
+        data.put(custom ? "customAdId" : "rewardedVideoAdId", adId);
+        data.put(custom ? "isSuccess" : "isEnded", Boolean.TRUE);
+        String event = custom ? "customAdReward" : "rewardedVideoAdClose";
         try {
             Method dispatch = module.getClass().getMethod(
                     "dispatchEvent", String.class, Object.class);
-            dispatch.invoke(module, "rewardedVideoAdClose", data);
-            Log.i(TAG, "emitted rewardedVideoAdClose isEnded=true");
+            dispatch.invoke(module, event, data);
+            Log.i(TAG, "emitted " + event + " success=true");
         } catch (Throwable throwable) {
             Log.w(TAG, "reward event dispatch failed", throwable);
         }

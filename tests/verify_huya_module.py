@@ -59,8 +59,8 @@ def main() -> None:
 
     manifest = run(str(AAPT2), "dump", "xmltree", "--file", "AndroidManifest.xml", str(args.module))
     assert 'package="io.github.saycm.huya.skipad"' in manifest
-    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "12"
-    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.11"
+    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "14"
+    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.13"
     assert "xposedmodule" not in manifest
     assert "xposedminversion" not in manifest
 
@@ -77,6 +77,11 @@ def main() -> None:
         '"com.duowan.kiwi"',
         '"com.huya.kiwi.hyext.impl.modules.internal.HyExtAd"',
         '"showRewardedVideoAd"',
+        '"showCustomAd"',
+        '"openCustomAd"',
+        '"customAdId"',
+        '"customAdReward"',
+        '"isSuccess"',
         '"rewardedVideoAdId"',
         '"rewardedVideoAdClose"',
         '"isEnded"',
@@ -116,6 +121,16 @@ def main() -> None:
     ) in target_code
     assert '"rewardedVideoAdClose"' in target_code
     assert '"isEnded"' in target_code
+    assert (
+        ".method public final openCustomAd(Ljava/lang/Object;"
+        "Lcom/huya/hybrid/webview/jssdk/JsCallback;)V"
+    ) in target_code
+    assert (
+        ".method public final showCustomAd(Ljava/lang/Object;"
+        "Lcom/huya/hybrid/webview/jssdk/JsCallback;)V"
+    ) in target_code
+    assert '"customAdReward"' in target_code
+    assert '"isSuccess"' in target_code
 
     ams_helper_code = run(str(APKANALYZER), "dex", "code", "--class", AMS_HELPER, str(args.target))
     assert (

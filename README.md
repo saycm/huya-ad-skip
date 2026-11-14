@@ -8,6 +8,8 @@
 - 过滤推荐列表中的广告卡片，保留普通内容顺序。
 - 拦截自动推广弹窗和直播间外普通广告请求。
 - 跳过“看广告赚虎粮”等奖励广告：点击后不打开视频广告页，直接执行原完成、关闭和发奖回调。
+- 支持小程序游戏的自定义广告领取和激励视频奖励回调。
+- 阻止小程序自定义广告横幅挂载，避免领奖确认时误触下方广告。
 - 奖励到账继续由虎牙原有业务流程处理；“直接领取”“看广告立即膨胀”等原有领奖选项可能保留。
 
 ## 兼容性
@@ -15,7 +17,7 @@
 | 项目 | 版本或范围 |
 | --- | --- |
 | 目标应用 | 虎牙 13.5.44，versionCode `117129` |
-| 模块版本 | 1.11，versionCode `12` |
+| 模块版本 | 1.13，versionCode `14` |
 | 模块包名 | `io.github.saycm.huya.skipad` |
 | 作用域 | `com.duowan.kiwi` |
 | Android | Android 10 及以上（API 29+） |
@@ -34,6 +36,18 @@
 - [完整变更记录](CHANGELOG.md)
 
 ## 版本变动
+
+### 1.13
+
+- 阻止小程序游戏通过 `showCustomAd` 挂载底部广告横幅。
+- 保留展示成功回调，使领奖确认流程正常完成。
+- 增加横幅不挂载的回归测试。
+
+### 1.12
+
+- 补充小程序游戏 `openCustomAd` 广告领取入口，发送匹配的奖励完成事件。
+- 修复小程序广告参数为 Map 时无法读取广告 ID 的问题。
+- 增加小程序两种奖励协议的回归测试。
 
 ### 1.11
 
@@ -79,6 +93,7 @@ python tools\build.py
 python tests\test_huya_api102_metadata.py
 python tests\test_huya_loader_lifecycle.py
 python tests\test_huya_display_ads.py
+python tests\test_huya_miniapp_rewards.py
 ```
 
 ## 许可证
