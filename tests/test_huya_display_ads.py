@@ -10,6 +10,87 @@ from test_huya_loader_lifecycle import JDK, ROOT, SDK, SOURCES
 
 DISPLAY_SOURCES = dict(SOURCES)
 DISPLAY_SOURCES.update({
+    "com/duowan/kiwi/universal/live/activitybar/banner/UniversalLiveBannerView.java": """
+package com.duowan.kiwi.universal.live.activitybar.banner;
+import java.util.*;
+public class UniversalLiveBannerView {
+ public List<?> items=new ArrayList<>();
+ public boolean visible;
+ public int updates;
+ public void setData(List<?> data){
+  updates++;items=data==null?new ArrayList<>():new ArrayList<>(data);visible=!items.isEmpty();
+ }
+}
+""",
+    "com/duowan/kiwi/universal/live/activitybar/banner/UniversalTaskBannerView.java": """
+package com.duowan.kiwi.universal.live.activitybar.banner;
+import java.util.*;
+public class UniversalTaskBannerView {
+ public List<?> items=new ArrayList<>();
+ public void setData(List<?> data){items=new ArrayList<>(data);}
+}
+""",
+    "com/duowan/HUYA/ActCommEnt.java": """
+package com.duowan.HUYA;
+public class ActCommEnt {
+ public int iEntId;
+ public ActCommEnt(int id){iEntId=id;}
+}
+""",
+    "com/duowan/kiwi/passage/api/view/floatwindow/IFloatWindowContainer.java": """
+package com.duowan.kiwi.passage.api.view.floatwindow;
+public interface IFloatWindowContainer {}
+""",
+    "com/huya/oak/miniapp/container/internal/MiniAppPopupFragment.java": """
+package com.huya.oak.miniapp.container.internal;
+public class MiniAppPopupFragment {}
+""",
+    "com/huya/kiwi/hyext/delegate/api/HYExtRightTopWindowModeManager.java": """
+package com.huya.kiwi.hyext.delegate.api;
+import com.duowan.HUYA.ActCommEnt;
+import com.duowan.kiwi.passage.api.view.floatwindow.IFloatWindowContainer;
+import com.huya.oak.miniapp.container.internal.MiniAppPopupFragment;
+public class HYExtRightTopWindowModeManager {
+ public int attachedCards;
+ public void createFloatWindowItemView(IFloatWindowContainer container,
+   MiniAppPopupFragment fragment,ActCommEnt item,int index,boolean landscape){
+  attachedCards++;
+ }
+}
+""",
+    "com/duowan/kiwi/livead/api/adplugin/api/IHYRoomPopupPlugin.java": """
+package com.duowan.kiwi.livead.api.adplugin.api;
+public interface IHYRoomPopupPlugin {
+ interface IHYChannelAvailabilityCheckCallback {}
+}
+""",
+    "com/duowan/kiwi/livead/impl/adplugin/module/HYRoomPopupPlugin.java": """
+package com.duowan.kiwi.livead.impl.adplugin.module;
+import com.duowan.kiwi.livead.api.adplugin.api.IHYRoomPopupPlugin.IHYChannelAvailabilityCheckCallback;
+public class HYRoomPopupPlugin {
+ public int queuedCards;
+ public void enqueue(String id,String data,IHYChannelAvailabilityCheckCallback callback){
+  queuedCards++;
+ }
+}
+""",
+    "com/duowan/kiwi/popup/api/PopupItem.java": """
+package com.duowan.kiwi.popup.api;
+public class PopupItem {
+ private final String key;
+ public PopupItem(String key){this.key=key;}
+ public String getBusinessKey(){return key;}
+}
+""",
+    "com/duowan/kiwi/popup/impl/PopupModule.java": """
+package com.duowan.kiwi.popup.impl;
+import com.duowan.kiwi.popup.api.PopupItem;
+public class PopupModule {
+ public int queuedCards;
+ public boolean tryShowPopup(PopupItem item){if(item==null)return false;queuedCards++;return true;}
+ public boolean tryPlaceholderPopup(PopupItem item){queuedCards++;return true;}
+}
+""",
     "com/duowan/kiwi/adsplash/controller/AdRouter.java": """
 package com.duowan.kiwi.adsplash.controller;
 public class AdRouter {
@@ -100,6 +181,16 @@ import com.duowan.kiwi.list.homepage.tab.recommend.BaseRecommendPresenter;
 import com.duowan.kiwi.immersepage.api.data.ImmerseItem;
 import com.duowan.kiwi.immersepage.api.data.ImmerseItemType;
 import com.duowan.kiwi.immersepage.impl.data.ImmerseDataManagerImpl;
+import com.duowan.kiwi.popup.api.PopupItem;
+import com.duowan.kiwi.popup.impl.PopupModule;
+import com.duowan.kiwi.livead.impl.adplugin.module.HYRoomPopupPlugin;
+import com.duowan.kiwi.livead.api.adplugin.api.IHYRoomPopupPlugin.IHYChannelAvailabilityCheckCallback;
+import com.duowan.HUYA.ActCommEnt;
+import com.duowan.kiwi.passage.api.view.floatwindow.IFloatWindowContainer;
+import com.huya.oak.miniapp.container.internal.MiniAppPopupFragment;
+import com.huya.kiwi.hyext.delegate.api.HYExtRightTopWindowModeManager;
+import com.duowan.kiwi.universal.live.activitybar.banner.UniversalLiveBannerView;
+import com.duowan.kiwi.universal.live.activitybar.banner.UniversalTaskBannerView;
 public class DisplayAdsTest {
  static final class Param implements XposedModule.PackageReadyParam {
   final ClassLoader loader;
@@ -154,7 +245,86 @@ public class DisplayAdsTest {
   XposedModule.invokeHook(
    android.app.Activity.class.getDeclaredMethod("onCreate",android.os.Bundle.class),
    new ActivityChain(new DisplayAdsTest()));
-  if(args[0].equals("splash")){
+  if(args[0].equals("live-cards")){
+   PopupModule module=new PopupModule();
+   for(String key:new String[]{"magicboxrecentresult_autotrigger",
+     "giftblindbox_autotrigger","adrewardtasks_autotrigger","gamepad_autotrigger",
+     "gamead_autotrigger"}){
+    Object result=call(module,"tryShowPopup",new Class<?>[]{PopupItem.class},new PopupItem(key));
+    check(Boolean.FALSE.equals(result),"Automatic live-room cards must be rejected before queueing");
+   }
+   check(module.queuedCards==0,"No automatic live-room card may enter the popup queue");
+   for(String key:new String[]{"magicboxrecentresult","adrewardtasks","gamead",
+     "autotrigger_help","unknown",null}){
+    Object result=call(module,"tryShowPopup",new Class<?>[]{PopupItem.class},new PopupItem(key));
+    check(Boolean.TRUE.equals(result),"Manual and unknown popup entries must keep working");
+   }
+   check(module.queuedCards==6,"Manual popup requests must each run exactly once");
+   check(Boolean.FALSE.equals(call(module,"tryShowPopup",new Class<?>[]{PopupItem.class},
+    new Object[]{null})),"Null input must retain original validation");
+   check(module.queuedCards==6,"Null input must not enter the queue");
+  }else if(args[0].equals("live-placeholder-cards")){
+   PopupModule module=new PopupModule();
+   for(String key:new String[]{"gamead_autotrigger","shop_autotrigger",
+     "shopplaymate_autotrigger"}){
+    Object result=call(module,"tryPlaceholderPopup",new Class<?>[]{PopupItem.class},
+     new PopupItem(key));
+    check(Boolean.FALSE.equals(result),"Automatic placeholder cards must be rejected before queueing");
+   }
+   check(module.queuedCards==0,"Placeholder promotion must not bypass the popup filter");
+   for(String key:new String[]{"gamead","shop","unknown",null}){
+    Object result=call(module,"tryPlaceholderPopup",new Class<?>[]{PopupItem.class},
+     new PopupItem(key));
+    check(Boolean.TRUE.equals(result),"Manual placeholder entries must retain their original behavior");
+   }
+   check(module.queuedCards==4,"Manual placeholder requests must each run exactly once");
+  }else if(args[0].equals("live-promotion-windows")){
+   HYExtRightTopWindowModeManager manager=new HYExtRightTopWindowModeManager();
+   Class<?>[] types={IFloatWindowContainer.class,MiniAppPopupFragment.class,
+    ActCommEnt.class,int.class,boolean.class};
+   for(int id:new int[]{317,201,175}){
+    for(boolean landscape:new boolean[]{false,true}){
+     for(MiniAppPopupFragment fragment:new MiniAppPopupFragment[]{
+       null,new MiniAppPopupFragment()}){
+      call(manager,"createFloatWindowItemView",types,null,fragment,
+       new ActCommEnt(id),0,landscape);
+     }
+    }
+   }
+   check(manager.attachedCards==0,"Gift, game and shopping promotions must not attach floating cards");
+   for(ActCommEnt item:new ActCommEnt[]{new ActCommEnt(0),new ActCommEnt(999),null}){
+    call(manager,"createFloatWindowItemView",types,null,new MiniAppPopupFragment(),item,0,false);
+   }
+   check(manager.attachedCards==3,"Other entrance IDs and null must retain original handling");
+  }else if(args[0].equals("live-promotion-banners")){
+   UniversalLiveBannerView banner=new UniversalLiveBannerView();
+   banner.setData(Arrays.asList("old promotion"));
+   List<Object> input=new ArrayList<>(Arrays.asList(new Object(),new Object()));
+   for(int i=0;i<2;i++){
+    call(banner,"setData",new Class<?>[]{List.class},input);
+    check(!banner.visible && banner.items.isEmpty(),
+     "Live promotion banners must use the original empty-data hide route");
+   }
+   check(input.size()==2,"Banner filtering must not mutate the caller's list");
+   check(banner.updates==3,"Banner cleanup must execute the original lifecycle exactly once per update");
+   call(banner,"setData",new Class<?>[]{List.class},new Object[]{null});
+   check(!banner.visible,"Null banner reset must keep working");
+   UniversalTaskBannerView task=new UniversalTaskBannerView();
+   call(task,"setData",new Class<?>[]{List.class},input);
+   check(task.items.size()==2,"Task progress banners must retain their data");
+  }else if(args[0].equals("live-floating-ads")){
+   HYRoomPopupPlugin plugin=new HYRoomPopupPlugin();
+   Class<?>[] types={String.class,String.class,IHYChannelAvailabilityCheckCallback.class};
+   for(String id:new String[]{"floatball_ad_example_1","floatball_ad_example_2"}){
+    call(plugin,"enqueue",types,id,"{}",null);
+   }
+   check(plugin.queuedCards==0,"Floating ad cards must not enter the native popup queue");
+   for(String id:new String[]{"floatball_dailyfreegift_autotrigger_example",
+     "floatball_reward_manual_example","unknown",null}){
+    call(plugin,"enqueue",types,id,"{}",null);
+   }
+   check(plugin.queuedCards==4,"Reward entries and unknown native popups must retain their queue");
+  }else if(args[0].equals("splash")){
    AdRouter router=new AdRouter();
    for(boolean hot:new boolean[]{false,true})
     for(boolean cached:new boolean[]{false,true}){
@@ -312,6 +482,21 @@ class HuyaDisplayAdsTest(unittest.TestCase):
 
     def test_automatic_promotion_stops_before_queuing_a_dialog(self):
         self.run_case("promotion")
+
+    def test_automatic_live_cards_stop_before_queueing_and_keep_manual_entries(self):
+        self.run_case("live-cards")
+
+    def test_live_floating_ads_stop_before_native_queue_without_removing_reward_entries(self):
+        self.run_case("live-floating-ads")
+
+    def test_automatic_placeholder_cards_cannot_bypass_the_popup_filter(self):
+        self.run_case("live-placeholder-cards")
+
+    def test_promotional_h5_and_miniapp_cards_do_not_attach_floating_windows(self):
+        self.run_case("live-promotion-windows")
+
+    def test_live_promotion_banner_refills_are_hidden_without_removing_task_progress(self):
+        self.run_case("live-promotion-banners")
 
     def test_recommendation_ads_stop_before_dynamic_card_injection(self):
         self.run_case("dynamic")

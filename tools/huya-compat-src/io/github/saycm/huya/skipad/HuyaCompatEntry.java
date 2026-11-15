@@ -96,6 +96,7 @@ public final class HuyaCompatEntry extends XposedModule {
         hookAwardRequests(classLoader);
         hookAdRequestDiagnostics(classLoader);
         hookDisplayAds(classLoader);
+        hookLiveRoomCards(classLoader);
         hookImmerseFeedAds(classLoader);
         hookListAds(classLoader);
         hookSplash(classLoader);
@@ -256,6 +257,84 @@ public final class HuyaCompatEntry extends XposedModule {
                 });
                 logInfo("hooked recommendation grid insertion");
             }
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+    }
+
+    private void hookLiveRoomCards(ClassLoader classLoader) {
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.universal.live.activitybar.banner.UniversalLiveBannerView");
+            Method setData = type.getDeclaredMethod("setData", List.class);
+            hook(setData).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object data = chain.getArg(0);
+                if (data instanceof List && !((List<?>) data).isEmpty()) {
+                    logInfo("cleared live-room promotion banner");
+                    return chain.proceed(new Object[]{new ArrayList<>()});
+                }
+                return chain.proceed();
+            });
+            logInfo("hooked live-room promotion banner data");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+        try {
+            Class<?> type = classLoader.loadClass("com.duowan.kiwi.popup.impl.PopupModule");
+            Class<?> itemType = classLoader.loadClass("com.duowan.kiwi.popup.api.PopupItem");
+            Method businessKey = itemType.getMethod("getBusinessKey");
+            for (String name : new String[]{"tryShowPopup", "tryPlaceholderPopup"}) {
+                Method show = type.getDeclaredMethod(name, itemType);
+                hook(show).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    Object item = chain.getArg(0);
+                    Object key = item == null ? null : businessKey.invoke(item);
+                    if (key instanceof String && ((String) key).endsWith("_autotrigger")) {
+                        logInfo("blocked automatic live-room card before queueing");
+                        return false;
+                    }
+                    return chain.proceed();
+                });
+            }
+            logInfo("hooked automatic live-room cards");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.huya.kiwi.hyext.delegate.api.HYExtRightTopWindowModeManager");
+            Method create = findMethod(type, "createFloatWindowItemView", 5);
+            if (create != null) {
+                hook(create).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                    Object id = field(chain.getArg(2), "iEntId");
+                    // Huya's gift offer, game promotion and shopping activity windows.
+                    if (Integer.valueOf(317).equals(id) || Integer.valueOf(201).equals(id)
+                            || Integer.valueOf(175).equals(id)) {
+                        logInfo("blocked promotional live-room window before creation");
+                        return null;
+                    }
+                    return chain.proceed();
+                });
+                logInfo("hooked promotional live-room window creation");
+            }
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.livead.impl.adplugin.module.HYRoomPopupPlugin");
+            Method enqueue = findMethod(type, "enqueue", 3);
+            if (enqueue == null) {
+                return;
+            }
+            hook(enqueue).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object id = chain.getArg(0);
+                if (id instanceof String && ((String) id).startsWith("floatball_ad_")) {
+                    logInfo("blocked live-room floating ad before queueing");
+                    return null;
+                }
+                return chain.proceed();
+            });
+            logInfo("hooked live-room floating ad queue");
         } catch (Throwable throwable) {
             logFailure(throwable);
         }

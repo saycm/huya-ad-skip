@@ -59,8 +59,8 @@ def main() -> None:
 
     manifest = run(str(AAPT2), "dump", "xmltree", "--file", "AndroidManifest.xml", str(args.module))
     assert 'package="io.github.saycm.huya.skipad"' in manifest
-    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "14"
-    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.13"
+    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "15"
+    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.14"
     assert "xposedmodule" not in manifest
     assert "xposedminversion" not in manifest
 
@@ -82,6 +82,17 @@ def main() -> None:
         '"customAdId"',
         '"customAdReward"',
         '"isSuccess"',
+        '"com.duowan.kiwi.popup.impl.PopupModule"',
+        '"tryShowPopup"',
+        '"tryPlaceholderPopup"',
+        '"getBusinessKey"',
+        '"_autotrigger"',
+        '"com.duowan.kiwi.livead.impl.adplugin.module.HYRoomPopupPlugin"',
+        '"enqueue"',
+        '"floatball_ad_"',
+        '"com.huya.kiwi.hyext.delegate.api.HYExtRightTopWindowModeManager"',
+        '"createFloatWindowItemView"',
+        '"com.duowan.kiwi.universal.live.activitybar.banner.UniversalLiveBannerView"',
         '"rewardedVideoAdId"',
         '"rewardedVideoAdClose"',
         '"isEnded"',
@@ -156,6 +167,26 @@ def main() -> None:
     assert ".method public dismissWhenError(Ljava/lang/String;)V" in splash_code
 
     display_interfaces = {
+        "com.duowan.kiwi.universal.live.activitybar.banner.UniversalLiveBannerView": (
+            ".method public setData(Ljava/util/List;)V",
+        ),
+        "com.huya.kiwi.hyext.delegate.api.HYExtRightTopWindowModeManager": (
+            ".method public final createFloatWindowItemView("
+            "Lcom/duowan/kiwi/passage/api/view/floatwindow/IFloatWindowContainer;"
+            "Lcom/huya/oak/miniapp/container/internal/MiniAppPopupFragment;"
+            "Lcom/duowan/HUYA/ActCommEnt;IZ)V",
+        ),
+        "com.duowan.kiwi.popup.impl.PopupModule": (
+            ".method public tryShowPopup(Lcom/duowan/kiwi/popup/api/PopupItem;)Z",
+            ".method public tryPlaceholderPopup(Lcom/duowan/kiwi/popup/api/PopupItem;)Z",
+        ),
+        "com.duowan.kiwi.popup.api.PopupItem": (
+            ".method public getBusinessKey()Ljava/lang/String;",
+        ),
+        "com.duowan.kiwi.livead.impl.adplugin.module.HYRoomPopupPlugin": (
+            ".method public enqueue(Ljava/lang/String;Ljava/lang/String;"
+            "Lcom/duowan/kiwi/livead/api/adplugin/api/IHYRoomPopupPlugin$IHYChannelAvailabilityCheckCallback;)V",
+        ),
         "com.duowan.kiwi.adsplash.controller.AdRouter": (
             ".method public final isNeedShowAdSplash(Landroid/content/Context;ZZZ)I",
         ),
