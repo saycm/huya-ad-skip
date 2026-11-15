@@ -25,6 +25,7 @@ import java.util.*;
 public final class Handler {
  public static final List<Runnable> pending=new ArrayList<>();
  public Handler(Looper looper){}
+ public boolean post(Runnable callback){return postDelayed(callback,0);}
  public boolean postDelayed(Runnable callback,long delay){pending.add(callback);return true;}
  public static void drain(){
   List<Runnable> callbacks=new ArrayList<>(pending);pending.clear();

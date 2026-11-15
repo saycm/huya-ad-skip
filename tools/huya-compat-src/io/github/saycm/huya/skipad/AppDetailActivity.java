@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -17,6 +18,7 @@ import java.util.Map;
 
 public final class AppDetailActivity extends Activity {
     private SharedPreferences prefs;
+    private AutomationPanel automation;
     private boolean serviceConnected;
     private final Map<String, Boolean> pending = new HashMap<>();
 
@@ -26,6 +28,7 @@ public final class AppDetailActivity extends Activity {
         setContentView(R.layout.activity_app_detail);
 
         findViewById(R.id.detail_back).setOnClickListener(view -> finish());
+        automation = new AutomationPanel(this, (LinearLayout) findViewById(R.id.automation_settings));
 
         boolean installed = packageInstalled("com.duowan.kiwi");
         TextView appStatus = (TextView) findViewById(R.id.app_status);
@@ -87,6 +90,7 @@ public final class AppDetailActivity extends Activity {
 
     private void onRemoteConnected(SharedPreferences remote) {
         prefs = remote;
+        automation.onRemoteConnected(remote);
         serviceConnected = true;
         for (Map.Entry<String, Boolean> entry : pending.entrySet()) {
             remote.edit().putBoolean(entry.getKey(), entry.getValue()).apply();

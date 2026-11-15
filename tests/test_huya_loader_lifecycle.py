@@ -61,7 +61,23 @@ public abstract class XposedModule {
   Object proceed(Object[] args) throws Throwable;
  }
  public int getApiVersion(){return 102;}
- public android.content.SharedPreferences getRemotePreferences(String name){return null;}
+ public static final long PROP_CAP_SYSTEM=1L;
+ public static String frameworkName="LSPosed";
+ public static long frameworkProperties=1L;
+ public static String frameworkFailure="";
+ public static int preferenceReads;
+ public String getFrameworkName(){
+  if("name".equals(frameworkFailure))throw new IllegalStateException("unavailable");
+  return frameworkName;
+ }
+ public long getFrameworkProperties(){
+  if("properties".equals(frameworkFailure))throw new IllegalStateException("unavailable");
+  if("linkage".equals(frameworkFailure))throw new NoSuchMethodError("unavailable");
+  return frameworkProperties;
+ }
+ public android.content.SharedPreferences getRemotePreferences(String name){
+  preferenceReads++;return null;
+ }
  public void onModuleLoaded(ModuleLoadedParam param){}
  public void onPackageReady(PackageReadyParam param){}
  public boolean onHotReloading(HotReloadingParam param){return false;}
@@ -120,6 +136,30 @@ public abstract class XposedModule {
   public Object proceed(Object[] values) throws Throwable {
    return invoke(method,target,values);
   }
+ }
+}
+""",
+    "io/github/libxposed/api/FrameworkGateTest.java": """
+package io.github.libxposed.api;
+import io.github.saycm.huya.skipad.HuyaCompatEntry;
+public final class FrameworkGateTest {
+ public static void main(String[] args){
+  XposedModule.frameworkName="null".equals(args[0])?null:args[0];
+  XposedModule.frameworkProperties=Long.parseLong(args[1]);
+  XposedModule.frameworkFailure=args[2];
+  boolean allowed=Boolean.parseBoolean(args[3]);
+  final int[] loaderReads={0};
+  HuyaCompatEntry entry=new HuyaCompatEntry();
+  entry.onModuleLoaded(()->"com.duowan.kiwi");
+  entry.onPackageReady(new XposedModule.PackageReadyParam(){
+   public String getPackageName(){return "com.duowan.kiwi";}
+   public boolean isFirstPackage(){return true;}
+   public ClassLoader getClassLoader(){loaderReads[0]++;return getClass().getClassLoader();}
+  });
+  if(XposedModule.hooks.size()!=(allowed?2:0))
+   throw new AssertionError("Unexpected hooks for framework: "+args[0]);
+  if(XposedModule.preferenceReads!=(allowed?1:0)||loaderReads[0]!=(allowed?1:0))
+   throw new AssertionError("Rejected framework accessed preferences or class loader");
  }
 }
 """,
@@ -233,6 +273,11 @@ public final class LoaderActivity {
 }
 
 
+for automation_class in ("DailyAutomation", "TaskLogProvider", "AutomationRules", "LocalTaskStore"):
+    automation_path = f"io/github/saycm/huya/skipad/{automation_class}.java"
+    SOURCES[automation_path] = (ROOT / "tools/huya-compat-src" / automation_path).read_text(encoding="utf-8")
+
+
 class HuyaLoaderLifecycleTest(unittest.TestCase):
     def test_first_activity_uses_its_dynamic_loader_once(self):
         with tempfile.TemporaryDirectory(prefix="huya-loader-") as folder:
@@ -287,6 +332,32 @@ class HuyaLoaderLifecycleTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             print(result.stdout.strip())
+            cases = [
+                ("LSPosed", 1, "", True),
+                ("LSPosed", 7, "", True),
+                ("LSPosed", 0, "", False),
+                ("LSPosed", 2, "", False),
+                ("FPA", 1, "", False),
+                ("LSPatch", 1, "", False),
+                ("NPatch", 1, "", False),
+                ("LSPosedFake", 1, "", False),
+                ("null", 1, "", False),
+                ("", 1, "", False),
+                ("LSPosed", 1, "name", False),
+                ("LSPosed", 1, "properties", False),
+                ("LSPosed", 1, "linkage", False),
+            ]
+            for name, properties, failure, allowed in cases:
+                with self.subTest(framework=name, properties=properties, failure=failure):
+                    result = subprocess.run(
+                        [str(JDK / "bin" / ("java" + EXE)), "-cp",
+                         os.pathsep.join([str(root / "classes"), str(android)]),
+                         "io.github.libxposed.api.FrameworkGateTest", name,
+                         str(properties), failure, str(allowed).lower()],
+                        capture_output=True, text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

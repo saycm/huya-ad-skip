@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.saycm.huya.skipad"
-    android:versionCode="16"
-    android:versionName="1.15">
+    android:versionCode="17"
+    android:versionName="1.16">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36" />
     <queries>
         <package android:name="com.duowan.kiwi" />
@@ -23,6 +23,14 @@
         </activity>
         <activity
             android:name=".AppDetailActivity"
+            android:exported="false"
+            android:theme="@style/GlassDashboard" />
+        <provider
+            android:name=".TaskLogProvider"
+            android:authorities="io.github.saycm.huya.skipad.tasks"
+            android:exported="true" />
+        <activity
+            android:name=".TaskLogActivity"
             android:exported="false"
             android:theme="@style/GlassDashboard" />
         <provider

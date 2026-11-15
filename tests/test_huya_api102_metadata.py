@@ -56,8 +56,8 @@ class HuyaApi102MetadataTest(unittest.TestCase):
             (MODULE_DIR / "res/mipmap-xxxhdpi/ic_launcher.png").is_file(),
             "launcher icon is missing",
         )
-        self.assertIn('android:versionCode="16"', manifest)
-        self.assertIn('android:versionName="1.15"', manifest)
+        self.assertIn('android:versionCode="17"', manifest)
+        self.assertIn('android:versionName="1.16"', manifest)
         self.assertIn('android:name=".GlassDashboardActivity"', manifest)
         self.assertIn('android:name=".AppDetailActivity"', manifest)
         self.assertIn('android:theme="@style/GlassDashboard"', manifest)
@@ -209,6 +209,8 @@ class HuyaApi102MetadataTest(unittest.TestCase):
                     os.pathsep.join((str(android), str(api_jar))),
                     "-d",
                     str(classes),
+                    "-sourcepath",
+                    str(ROOT / "tools/huya-compat-src"),
                     str(source),
                     str(settings),
                 ],

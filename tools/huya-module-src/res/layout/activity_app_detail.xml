@@ -343,6 +343,15 @@
                 android:textSize="13sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/automation_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/glass_card"
+            android:orientation="vertical"
+            android:padding="16dp" />
+
         <Button
             android:id="@+id/copy_diagnostics_detail"
             android:layout_width="match_parent"

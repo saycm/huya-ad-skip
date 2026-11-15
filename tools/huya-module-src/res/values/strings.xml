@@ -4,7 +4,7 @@
     <string name="app_description">虎牙开屏、列表广告过滤及奖励广告跳过</string>
     <string name="dashboard_title">FuckAD</string>
     <string name="dashboard_subtitle">只为了干掉AD</string>
-    <string name="dashboard_version">v1.15</string>
+    <string name="dashboard_version">v1.16</string>
     <string name="status_checking">正在检测框架加载状态</string>
     <string name="status_ok">模块运行正常</string>
     <string name="status_loaded">LSPosed 已加载虎牙模块</string>

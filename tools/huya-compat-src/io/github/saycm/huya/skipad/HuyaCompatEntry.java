@@ -42,6 +42,7 @@ public final class HuyaCompatEntry extends XposedModule {
     private boolean hooksInitialized;
     private boolean activityLoaderHookInstalled;
     private SharedPreferences prefs;
+    private DailyAutomation dailyAutomation;
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
@@ -56,9 +57,23 @@ public final class HuyaCompatEntry extends XposedModule {
             return;
         }
 
+        if (!isSupportedFramework()) {
+            logInfo("unsupported framework; hooks disabled");
+            return;
+        }
+
         logInfo("package ready " + param.getPackageName());
         prefs = getRemotePreferences(GlassSettings.PREFS);
         installActivityLoaderHook(param.getClassLoader());
+    }
+
+    private boolean isSupportedFramework() {
+        try {
+            return "LSPosed".equals(getFrameworkName())
+                    && (getFrameworkProperties() & PROP_CAP_SYSTEM) != 0;
+        } catch (RuntimeException | LinkageError failure) {
+            return false;
+        }
     }
 
     @Override
@@ -80,6 +95,20 @@ public final class HuyaCompatEntry extends XposedModule {
                         ? null : activity.getClass().getClassLoader();
                 initializeHooks(activityLoader);
                 return chain.proceed();
+            });
+            Method onResume = type.getDeclaredMethod("onResume");
+            hook(onResume).intercept(chain -> {
+                Object result = chain.proceed();
+                if (TARGET_PACKAGE.equals(android.app.Application.getProcessName())
+                        && chain.getThisObject() instanceof android.content.Context) {
+                    android.content.Context context = (android.content.Context) chain.getThisObject();
+                    if (dailyAutomation == null) {
+                        dailyAutomation = new DailyAutomation(this, prefs,
+                                chain.getThisObject().getClass().getClassLoader());
+                    }
+                    dailyAutomation.onOpen(context);
+                }
+                return result;
             });
             activityLoaderHookInstalled = true;
             logInfo("hooked activity ClassLoader initialization");
