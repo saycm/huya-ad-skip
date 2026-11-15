@@ -59,13 +59,17 @@ def main() -> None:
 
     manifest = run(str(AAPT2), "dump", "xmltree", "--file", "AndroidManifest.xml", str(args.module))
     assert 'package="io.github.saycm.huya.skipad"' in manifest
-    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "15"
-    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.14"
+    assert "io.github.libxposed.service.XposedProvider" in manifest
+    assert "io.github.saycm.huya.skipad.XposedService" in manifest
+    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "16"
+    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.15"
     assert "xposedmodule" not in manifest
     assert "xposedminversion" not in manifest
 
     defined = run(str(APKANALYZER), "dex", "packages", "--defined-only", str(args.module))
     assert ENTRY.replace(".", "/") in defined or "io.github.saycm.huya.skipad" in defined
+    assert "io.github.libxposed.service.XposedService" in defined
+    assert "io.github.libxposed.service.XposedProvider" in defined
     assert not re.search(r"^C\s+d\s+.*\tde\.robv\.android\.xposed", defined, re.MULTILINE), \
         "module contains legacy Xposed classes"
     assert not re.search(r"^C\s+d\s+.*\tio\.github\.libxposed\.api", defined, re.MULTILINE), \
@@ -90,6 +94,12 @@ def main() -> None:
         '"com.duowan.kiwi.livead.impl.adplugin.module.HYRoomPopupPlugin"',
         '"enqueue"',
         '"floatball_ad_"',
+        '"com.duowan.kiwi.popup.impl.pubscreen.PopupStrategyConditionHelper"',
+        '"checkPlatformVipFilter"',
+        '"getSummary"',
+        '"iIsNoShowForPlatformVip"',
+        '"com.duowan.kiwi.live.vip4k.Vip4KPlayHelper"',
+        '"isPlatformVipActive"',
         '"com.huya.kiwi.hyext.delegate.api.HYExtRightTopWindowModeManager"',
         '"createFloatWindowItemView"',
         '"com.duowan.kiwi.universal.live.activitybar.banner.UniversalLiveBannerView"',
@@ -167,6 +177,12 @@ def main() -> None:
     assert ".method public dismissWhenError(Ljava/lang/String;)V" in splash_code
 
     display_interfaces = {
+        "com.duowan.kiwi.popup.impl.pubscreen.PopupStrategyConditionHelper": (
+            ".method public final checkPlatformVipFilter(Lcom/duowan/kiwi/popup/api/PopupItem;)Z",
+        ),
+        "com.duowan.kiwi.live.vip4k.Vip4KPlayHelper": (
+            ".method public final isPlatformVipActive()Z",
+        ),
         "com.duowan.kiwi.universal.live.activitybar.banner.UniversalLiveBannerView": (
             ".method public setData(Ljava/util/List;)V",
         ),
@@ -182,6 +198,7 @@ def main() -> None:
         ),
         "com.duowan.kiwi.popup.api.PopupItem": (
             ".method public getBusinessKey()Ljava/lang/String;",
+            ".method public getSummary()Lcom/duowan/HUYA/LiveRoomPopupWindowSummary;",
         ),
         "com.duowan.kiwi.livead.impl.adplugin.module.HYRoomPopupPlugin": (
             ".method public enqueue(Ljava/lang/String;Ljava/lang/String;"

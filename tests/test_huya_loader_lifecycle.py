@@ -61,6 +61,7 @@ public abstract class XposedModule {
   Object proceed(Object[] args) throws Throwable;
  }
  public int getApiVersion(){return 102;}
+ public android.content.SharedPreferences getRemotePreferences(String name){return null;}
  public void onModuleLoaded(ModuleLoadedParam param){}
  public void onPackageReady(PackageReadyParam param){}
  public boolean onHotReloading(HotReloadingParam param){return false;}
@@ -246,6 +247,12 @@ class HuyaLoaderLifecycleTest(unittest.TestCase):
                 str(
                     ROOT
                     / "tools/huya-compat-src/io/github/saycm/huya/skipad/HuyaCompatEntry.java"
+                )
+            )
+            sources.append(
+                str(
+                    ROOT
+                    / "tools/huya-compat-src/io/github/saycm/huya/skipad/GlassSettings.java"
                 )
             )
             android = SDK / "platforms/android-36/android.jar"

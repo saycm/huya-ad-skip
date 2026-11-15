@@ -3,6 +3,7 @@ package io.github.saycm.huya.skipad;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.content.SharedPreferences;
 
 import org.json.JSONObject;
 
@@ -18,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import io.github.libxposed.api.XposedModule;
 
 public final class HuyaCompatEntry extends XposedModule {
-    private static final String TAG = "HuyaMiniappAD";
+    private static final String TAG = "FuckAD";
     private static final String TARGET_PACKAGE = "com.duowan.kiwi";
     private static final String TARGET_CLASS =
             "com.huya.kiwi.hyext.impl.modules.internal.HyExtAd";
@@ -40,6 +41,7 @@ public final class HuyaCompatEntry extends XposedModule {
     private static Handler mainHandler;
     private boolean hooksInitialized;
     private boolean activityLoaderHookInstalled;
+    private SharedPreferences prefs;
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
@@ -55,6 +57,7 @@ public final class HuyaCompatEntry extends XposedModule {
         }
 
         logInfo("package ready " + param.getPackageName());
+        prefs = getRemotePreferences(GlassSettings.PREFS);
         installActivityLoaderHook(param.getClassLoader());
     }
 
@@ -91,15 +94,73 @@ public final class HuyaCompatEntry extends XposedModule {
         }
         hooksInitialized = true;
         logInfo("initializing with activity loader " + classLoader);
-        hookMiniappReward(classLoader);
-        hookAmsReward(classLoader);
+        boolean ads = isEnabled(GlassSettings.KEY_ADS);
+        boolean liveCards = isEnabled(GlassSettings.KEY_LIVE_CARDS);
+        boolean rewards = isEnabled(GlassSettings.KEY_REWARDS);
+        boolean vipAds = isEnabled(GlassSettings.KEY_VIP_ADS);
+        boolean vip4k = isEnabled(GlassSettings.KEY_VIP_4K);
+        if (rewards) {
+            hookMiniappReward(classLoader);
+            hookAmsReward(classLoader);
+        }
         hookAwardRequests(classLoader);
         hookAdRequestDiagnostics(classLoader);
-        hookDisplayAds(classLoader);
-        hookLiveRoomCards(classLoader);
-        hookImmerseFeedAds(classLoader);
-        hookListAds(classLoader);
-        hookSplash(classLoader);
+        if (ads) {
+            hookDisplayAds(classLoader);
+            hookImmerseFeedAds(classLoader);
+            hookListAds(classLoader);
+            hookSplash(classLoader);
+        }
+        if (liveCards) {
+            hookLiveRoomCards(classLoader);
+        }
+        if (vipAds) {
+            hookVipAdFilter(classLoader);
+        }
+        if (vip4k) {
+            hookVip4KPlayback(classLoader);
+        }
+    }
+
+    private boolean isEnabled(String key) {
+        return prefs == null || prefs.getBoolean(key, true);
+    }
+
+    private void hookVipAdFilter(ClassLoader classLoader) {
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.popup.impl.pubscreen.PopupStrategyConditionHelper");
+            Class<?> itemType = classLoader.loadClass("com.duowan.kiwi.popup.api.PopupItem");
+            Method summary = itemType.getMethod("getSummary");
+            Method filter = type.getDeclaredMethod("checkPlatformVipFilter", itemType);
+            hook(filter).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                Object item = chain.getArg(0);
+                Object flag = item == null ? null
+                        : field(summary.invoke(item), "iIsNoShowForPlatformVip");
+                if (flag instanceof Number && ((Number) flag).intValue() == 1) {
+                    logInfo("blocked VIP-exempt live-room ad");
+                    return false;
+                }
+                return chain.proceed();
+            });
+            logInfo("hooked VIP-exempt live-room ad filter");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+    }
+
+    private void hookVip4KPlayback(ClassLoader classLoader) {
+        try {
+            Class<?> type = classLoader.loadClass(
+                    "com.duowan.kiwi.live.vip4k.Vip4KPlayHelper");
+            Method active = type.getDeclaredMethod("isPlatformVipActive");
+            // Use the existing member playback branch only inside the 4K helper.
+            // Stream availability and CDN authentication still use Huya's data.
+            hook(active).setPriority(PRIORITY_HIGHEST).intercept(chain -> true);
+            logInfo("hooked experimental 4K playback branch");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
     }
 
     private void hookImmerseFeedAds(ClassLoader classLoader) {

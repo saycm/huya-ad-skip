@@ -456,6 +456,7 @@ class HuyaDisplayAdsTest(unittest.TestCase):
             path.write_text(content, encoding="utf-8")
             sources.append(str(path))
         sources.append(str(ROOT / "tools/huya-compat-src/io/github/saycm/huya/skipad/HuyaCompatEntry.java"))
+        sources.append(str(ROOT / "tools/huya-compat-src/io/github/saycm/huya/skipad/GlassSettings.java"))
         cls.classpath = os.pathsep.join([
             str(cls.root / "classes"), str(SDK / "platforms/android-36/android.jar")
         ])

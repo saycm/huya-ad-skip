@@ -43,12 +43,143 @@ class HuyaApi102MetadataTest(unittest.TestCase):
 
     def test_manifest_does_not_use_legacy_xposed_metadata(self):
         manifest = (MODULE_DIR / "AndroidManifest.xml").read_text(encoding="utf-8")
+        strings = (MODULE_DIR / "res/values/strings.xml").read_text(encoding="utf-8")
         self.assertNotIn('"xposedmodule"', manifest)
         self.assertNotIn('"xposedminversion"', manifest)
         self.assertNotIn('"xposedscope"', manifest)
+        self.assertIn('<string name="app_name">FuckAD</string>', strings)
+        self.assertIn("<queries>", manifest)
+        self.assertIn('<package android:name="com.duowan.kiwi" />', manifest)
         self.assertIn('android:description="@string/app_description"', manifest)
-        self.assertIn('android:versionCode="15"', manifest)
-        self.assertIn('android:versionName="1.14"', manifest)
+        self.assertIn('android:icon="@mipmap/ic_launcher"', manifest)
+        self.assertTrue(
+            (MODULE_DIR / "res/mipmap-xxxhdpi/ic_launcher.png").is_file(),
+            "launcher icon is missing",
+        )
+        self.assertIn('android:versionCode="16"', manifest)
+        self.assertIn('android:versionName="1.15"', manifest)
+        self.assertIn('android:name=".GlassDashboardActivity"', manifest)
+        self.assertIn('android:name=".AppDetailActivity"', manifest)
+        self.assertIn('android:theme="@style/GlassDashboard"', manifest)
+        self.assertIn('io.github.libxposed.service.XposedProvider', manifest)
+        self.assertIn('io.github.saycm.huya.skipad.XposedService', manifest)
+
+    def test_glass_dashboard_resources_and_activity_exist(self):
+        layout = MODULE_DIR / "res/layout/activity_glass_dashboard.xml"
+        detail_layout = MODULE_DIR / "res/layout/activity_app_detail.xml"
+        hero_pika = MODULE_DIR / "res/drawable-xxxhdpi/ic_hero_pikachu.png"
+        app_pika = MODULE_DIR / "res/drawable-xxxhdpi/ic_app_pikachu.png"
+        activity = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/GlassDashboardActivity.java"
+        )
+        detail_activity = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/AppDetailActivity.java"
+        )
+        self.assertTrue(layout.is_file(), "glass dashboard layout is missing")
+        self.assertTrue(detail_layout.is_file(), "app detail layout is missing")
+        self.assertTrue(activity.is_file(), "glass dashboard activity is missing")
+        self.assertTrue(detail_activity.is_file(), "app detail activity is missing")
+        layout_text = layout.read_text(encoding="utf-8")
+        for name in (
+            "status_card",
+            "hero_avatar",
+            "app_card",
+            "action_app",
+            "status_dot",
+            "status_primary",
+            "status_secondary",
+            "guide_card",
+            "community_channel_row",
+            "community_discussion_row",
+        ):
+            self.assertIn(f'@+id/{name}', layout_text)
+        for name in (
+            "features_card",
+            "switch_ads",
+            "switch_vip_4k",
+            "status_remote",
+            "copy_diagnostics",
+            "info_card",
+            "status_module",
+        ):
+            self.assertNotIn(f'@+id/{name}', layout_text)
+        self.assertIn("Uri.parse", activity.read_text(encoding="utf-8"))
+        detail_text = detail_layout.read_text(encoding="utf-8")
+        self.assertTrue(hero_pika.is_file(), "hero pikachu drawable is missing")
+        self.assertTrue(app_pika.is_file(), "app pikachu drawable is missing")
+        self.assertIn("@drawable/ic_hero_pikachu", layout_text)
+        self.assertIn("@drawable/ic_app_pikachu", layout_text)
+        self.assertIn("@drawable/ic_app_pikachu", detail_text)
+        self.assertEqual(2, layout_text.count("@drawable/tg_avatar"))
+        self.assertTrue(
+            (MODULE_DIR / "res/drawable-xxxhdpi/tg_avatar.png").is_file(),
+            "telegram avatar drawable is missing",
+        )
+        for name in (
+            "detail_back",
+            "action_open_app",
+            "app_status",
+            "features_card",
+            "copy_diagnostics_detail",
+        ):
+            self.assertIn(f'@+id/{name}', detail_text)
+        for switch in ("ads", "live_cards", "rewards", "vip_ads", "vip_4k"):
+            self.assertIn(f'@+id/switch_{switch}_value', detail_text)
+            self.assertIn(f'@+id/switch_{switch}', detail_text)
+        self.assertIn("AppDetailActivity.class", activity.read_text(encoding="utf-8"))
+        activity_text = activity.read_text(encoding="utf-8")
+        self.assertIn("getApplicationInfo(packageName, 0)", activity_text)
+        self.assertIn('packageInstalled("com.duowan.kiwi")', activity_text)
+        detail_activity_text = detail_activity.read_text(encoding="utf-8")
+        self.assertIn('packageInstalled("com.duowan.kiwi")', detail_activity_text)
+        self.assertIn("getApplicationInfo(packageName, 0)", detail_activity_text)
+        self.assertTrue(
+            (
+                ROOT
+                / "tools/huya-compat-src/io/github/saycm/huya/skipad/GlassSettingsBridge.java"
+            ).is_file()
+        )
+
+    def test_glass_dashboard_toggles_control_hook_groups(self):
+        detail_activity = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/AppDetailActivity.java"
+        )
+        entry = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/HuyaCompatEntry.java"
+        )
+        settings = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/GlassSettings.java"
+        )
+        settings_text = settings.read_text(encoding="utf-8")
+        detail_text = detail_activity.read_text(encoding="utf-8")
+        self.assertIn("GlassSettings.PREFS", detail_text)
+        self.assertIn("bindSwitch(R.id.switch_ads_value", detail_text)
+        self.assertIn("syncSwitch(R.id.switch_vip_4k_value", detail_text)
+        self.assertIn("GlassSettings.PREFS", entry.read_text(encoding="utf-8"))
+        entry_text = entry.read_text(encoding="utf-8")
+        self.assertIn("getRemotePreferences(", entry_text)
+        for key in ("ads", "live_cards", "rewards", "vip_ads", "vip_4k"):
+            self.assertIn(f"KEY_{key.upper()}", settings_text)
+            self.assertIn(f"GlassSettings.KEY_{key.upper()}", detail_text)
+
+    def test_glass_dashboard_build_resolves_generated_resources(self):
+        build_script = (ROOT / "tools/build.py").read_text(encoding="utf-8")
+        self.assertIn('aapt2, "link"', build_script)
+        self.assertIn('(build / "gen").rglob("*.java")', build_script)
+        self.assertIn('libxposed_service_jar', build_script)
+        self.assertIn('libxposed_interface_jar', build_script)
+        self.assertIn('archive.extractall(build / "classes")', build_script)
+        self.assertLess(
+            build_script.index('aapt2, "link"'),
+            build_script.index('javac'),
+            "resources must be linked before Java sources compile",
+        )
+        self.assertNotIn("BuildConfig.VERSION_NAME", build_script)
 
     def test_entry_compiles_against_api_102_only(self):
         self.assertTrue(API_AAR.is_file(), f"missing API fixture: {API_AAR}")
@@ -65,6 +196,10 @@ class HuyaApi102MetadataTest(unittest.TestCase):
                 ROOT
                 / "tools/huya-compat-src/io/github/saycm/huya/skipad/HuyaCompatEntry.java"
             )
+            settings = (
+                ROOT
+                / "tools/huya-compat-src/io/github/saycm/huya/skipad/GlassSettings.java"
+            )
             result = subprocess.run(
                 [
                     str(JDK / "bin" / ("javac" + EXE)),
@@ -75,6 +210,7 @@ class HuyaApi102MetadataTest(unittest.TestCase):
                     "-d",
                     str(classes),
                     str(source),
+                    str(settings),
                 ],
                 capture_output=True,
                 text=True,
