@@ -200,6 +200,7 @@ public class LoaderLifecycleTest {
     return super.loadClass(name);
    }
    requests.add(name);
+   if("ryxq.weg".equals(name))return super.loadClass(name);
    throw new ClassNotFoundException(name);
   }
  }
@@ -233,6 +234,15 @@ public class LoaderLifecycleTest {
    }catch(Throwable ignored){
     throw new AssertionError(ignored);
    }
+   try {
+    ryxq.weg guide=new ryxq.weg();
+    XposedModule.call(guide,"shouldShowGuideDialog",new Class<?>[]{boolean.class},true);
+    if(guide.showGuide)throw new AssertionError("startup guide flag remained enabled");
+    if(!Boolean.FALSE.equals(XposedModule.call(guide,"shouldShowGuideDialog",new Class<?>[]{})))
+     throw new AssertionError("startup guide remained visible");
+    XposedModule.call(guide,"lock",new Class<?>[]{int.class},3);
+    if(guide.locks!=1)throw new AssertionError("teenager mode lock was changed");
+   }catch(Throwable failure){throw new AssertionError(failure);}
    for(String name:new String[]{
     "com.huya.kiwi.hyext.impl.modules.internal.HyExtAd",
     "com.duowan.kiwi.ad.helper.AmsAdHelper",
@@ -270,12 +280,27 @@ public final class LoaderActivity {
  public LoaderActivity(){}
 }
 """,
+    "ryxq/weg.java": """
+package ryxq;
+public class weg {
+ public boolean showGuide=true;
+ public int locks;
+ public void shouldShowGuideDialog(boolean value){showGuide=value;}
+ public boolean shouldShowGuideDialog(){return showGuide;}
+ public void lock(int type){locks++;}
+}
+""",
 }
 
 
-for automation_class in ("DailyAutomation", "TaskLogProvider", "AutomationRules", "LocalTaskStore"):
+for automation_class in ("DailyAutomation", "TaskLogProvider", "AutomationRules", "LocalTaskStore",
+                         "NativeTaskAutomation", "NativeTaskRunner", "NativeTaskCatalog", "TaskWire", "HuyaTaskClient",
+                         "DiceTaskRunner", "DiceTaskCatalog", "DiceMissionRunner"):
     automation_path = f"io/github/saycm/huya/skipad/{automation_class}.java"
     SOURCES[automation_path] = (ROOT / "tools/huya-compat-src" / automation_path).read_text(encoding="utf-8")
+SOURCES["io/github/saycm/huya/skipad/LiveQuality.java"] = (
+    ROOT / "tools/huya-compat-src/io/github/saycm/huya/skipad/LiveQuality.java"
+).read_text(encoding="utf-8")
 
 
 class HuyaLoaderLifecycleTest(unittest.TestCase):

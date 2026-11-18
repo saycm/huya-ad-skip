@@ -45,8 +45,11 @@ final class DailyAutomation {
     private boolean giftGuardInstalled;
     private Context context;
     private LocalTaskStore store;
+    private NativeTaskAutomation nativeTasks;
     private boolean syncRegistered;
     private final AtomicBoolean syncingLogs = new AtomicBoolean();
+    private final AtomicBoolean logsDirty = new AtomicBoolean();
+    private BroadcastReceiver syncReceiver;
     private boolean polling;
     private boolean callbacksInstalled;
     private boolean openedLogged;
@@ -55,6 +58,11 @@ final class DailyAutomation {
     private int signed;
     private int alreadySigned;
     private int failed;
+    private boolean giftActive;
+    private DailyAutomation diceSender;
+    private NativeTaskRunner.ActionReply diceGiftReply;
+    private java.util.function.BooleanSupplier diceGiftAllowed;
+    private String diceGiftKey;
 
     private static final class GiftLimit {
         final long presenter;
@@ -83,18 +91,21 @@ final class DailyAutomation {
 
     void onOpen(Context current) {
         context = current.getApplicationContext();
-        if (store == null) store = new LocalTaskStore(context);
+        if (store == null) store = new LocalTaskStore(context, this::requestLogSync);
+        if (nativeTasks == null) nativeTasks = new NativeTaskAutomation(module, prefs, loader, store, this);
+        nativeTasks.onActivity(current);
         if (!syncRegistered) {
-            BroadcastReceiver receiver = new BroadcastReceiver() {
+            syncReceiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context sender, Intent intent) {
-                    if (SYNC_LOGS.equals(intent.getAction()) && syncingLogs.compareAndSet(false, true)) {
-                        new Thread(DailyAutomation.this::syncLogs, "FuckAD-log-sync").start();
-                    }
+                    if (SYNC_LOGS.equals(intent.getAction())) requestLogSync();
                 }
             };
             IntentFilter filter = new IntentFilter(SYNC_LOGS);
-            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-            else context.registerReceiver(receiver, filter);
+            if (Build.VERSION.SDK_INT >= 33) {
+                context.registerReceiver(syncReceiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                context.registerReceiver(syncReceiver, filter);
+            }
             syncRegistered = true;
         }
         if (!openedLogged) {
@@ -111,6 +122,10 @@ final class DailyAutomation {
             long uid = loggedInUid();
             if (uid > 0) {
                 polling = false;
+                try { nativeTasks.onReady(uid); }
+                catch (RuntimeException | LinkageError failure) {
+                    log("虎牙任务中心", "", "失败", "新任务接口不可用，未影响原有每日任务");
+                }
                 runOnce(uid);
                 return;
             }
@@ -189,19 +204,36 @@ final class DailyAutomation {
         }
     }
 
+    private void requestLogSync() {
+        logsDirty.set(true);
+        if (!syncingLogs.compareAndSet(false, true)) return;
+        new Thread(this::syncLogs, "FuckAD-log-sync").start();
+    }
+
     private void syncLogs() {
+        boolean failed = false;
         try {
-            ArrayList<Bundle> events = store.events();
-            for (int start = 0; start < events.size(); start += 50) {
-                Bundle batch = new Bundle();
-                batch.putParcelableArrayList("events", new ArrayList<>(
-                        events.subList(start, Math.min(start + 50, events.size()))));
-                context.getContentResolver().call(TaskLogProvider.URI, "import", null, batch);
+            while (logsDirty.getAndSet(false)) {
+                ArrayList<Bundle> tasks = store.tasks();
+                Bundle taskBatch = new Bundle();
+                taskBatch.putParcelableArrayList("tasks", tasks);
+                context.getContentResolver().call(TaskLogProvider.URI, "import_tasks", null, taskBatch);
+                ArrayList<Bundle> events = store.events();
+                for (int start = 0; start < events.size(); start += 50) {
+                    Bundle batch = new Bundle();
+                    batch.putParcelableArrayList("events", new ArrayList<>(
+                            events.subList(start, Math.min(start + 50, events.size()))));
+                    context.getContentResolver().call(TaskLogProvider.URI, "import", null, batch);
+                }
             }
         } catch (RuntimeException failure) {
+            failed = true;
             module.log(Log.WARN, "FuckAD", "Log display sync unavailable; records remain in Huya");
         } finally {
             syncingLogs.set(false);
+            if (!failed && logsDirty.get() && syncingLogs.compareAndSet(false, true)) {
+                new Thread(this::syncLogs, "FuckAD-log-sync").start();
+            }
         }
     }
 
@@ -352,9 +384,44 @@ final class DailyAutomation {
         Map<Long, Integer> rooms = AutomationRules.parse(prefs.getString(GlassSettings.KEY_GIFT_ROOMS, ""));
         if (rooms.isEmpty()) log("免费虎粮", "", "跳过", "未配置直播间和数量");
         else {
+            giftActive = true;
             giftRooms.addAll(rooms.entrySet());
             nextGiftRoom();
         }
+    }
+
+    void sendDiceGrain(long uid, String day, long room, String operationKey,
+                       java.util.function.BooleanSupplier allowed, NativeTaskRunner.ActionReply reply) {
+        if (giftActive || diceSender != null && diceSender.diceGiftReply != null) {
+            reply.complete(false, "其他免费虎粮任务仍在处理，本轮不并发送礼");
+            return;
+        }
+        if (!allowed.getAsBoolean()) { reply.complete(false, "任务开关已关闭"); return; }
+        if (diceSender == null) diceSender = new DailyAutomation(module, prefs, loader);
+        DailyAutomation sender = diceSender;
+        sender.context = context; sender.store = store; sender.account = uid;
+        sender.activeDay = uid + "/" + day; sender.grainBudget = -1;
+        sender.diceGiftAllowed = allowed; sender.diceGiftKey = operationKey;
+        sender.diceGiftReply = reply;
+        sender.giftRooms.add(new java.util.AbstractMap.SimpleImmutableEntry<>(room, 1));
+        try {
+            sender.installCallbacks();
+            sender.nextGiftRoom();
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+            sender.finishDiceGift(false, "免费虎粮接口不可用");
+        }
+        handler.postDelayed(() -> {
+            if (sender.diceGiftReply == reply) sender.finishDiceGift(false, "赠送结果未确认，不自动重发");
+        }, 85000L);
+    }
+
+    private void finishDiceGift(boolean success, String detail) {
+        NativeTaskRunner.ActionReply reply = diceGiftReply;
+        if (reply == null) return;
+        diceGiftReply = null; diceGiftAllowed = () -> false;
+        giftRooms.clear(); requests.clear();
+        for (GiftLimit limit : guardedGifts.values()) limit.blocked = true;
+        reply.complete(success, detail);
     }
 
     private Object service(String className) throws ReflectiveOperationException {
@@ -370,6 +437,11 @@ final class DailyAutomation {
     private void nextGiftRoom() {
         Map.Entry<Long, Integer> room = giftRooms.poll();
         if (room == null) {
+            giftActive = false;
+            if (diceGiftReply != null) {
+                finishDiceGift(false, "本次未收到免费虎粮成功回执，不领取骰子奖励");
+                return;
+            }
             log("免费虎粮", "", "结束", "本轮任务结束，请按各房间记录核对结果");
             return;
         }
@@ -467,6 +539,7 @@ final class DailyAutomation {
                 Object request = chain.proceed();
                 Object pay = value(request, "tPayPloy");
                 boolean valid = !limit.blocked && loggedInUid() == account
+                    && (diceGiftAllowed == null || diceGiftAllowed.getAsBoolean())
                     && ((Number) value(request, "lGiftUid")).longValue() == limit.presenter
                     && ((Number) value(request, "lRoomUid")).longValue() == limit.presenter
                     && ((Number) value(request, "iItemCount")).intValue() == limit.count
@@ -556,7 +629,9 @@ final class DailyAutomation {
     private void sendGrain(long room, long presenter, int count, long freeCount, Object prop)
             throws ReflectiveOperationException {
         installGiftGuard();
-        if (loggedInUid() != account) throw new IllegalStateException("Account changed");
+        if (loggedInUid() != account || diceGiftAllowed != null && !diceGiftAllowed.getAsBoolean()) {
+            throw new IllegalStateException("Account or gift switch changed");
+        }
         Class<?> propType = loader.loadClass("com.duowan.kiwi.props.api.bean.PropItem");
         Object pay = loader.loadClass("com.duowan.kiwi.props.api.utils.SendGiftPayPloyUtil")
                 .getMethod("createPayPloy", float.class, float.class, long.class, boolean.class)
@@ -595,6 +670,7 @@ final class DailyAutomation {
                             "com.duowan.kiwi.props.api.request.SendGiftResult$Success")) {
                         grainBudget -= count;
                         log("免费虎粮", target, "成功", "收到虎牙送礼成功回执");
+                        finishDiceGift(true, "已收到 1 个免费虎粮赠送回执，等待骰子任务进度复核");
                     } else {
                         log("免费虎粮", target, "未完成", result == null ? "回执缺失" : result.getClass().getSimpleName());
                         skipRemainingGifts("前一笔赠送未成功，本轮停止后续赠送");
@@ -613,7 +689,8 @@ final class DailyAutomation {
         Method send = serviceType.getMethod("sendGiftCompat", params.getClass(), callbackType);
         Object giftService = service(serviceType.getName());
         if (giftService == null) throw new IllegalStateException("Gift service unavailable");
-        if (!claim("gift-send/" + activeDay + "/" + presenter)) {
+        if (!claim(diceGiftKey == null ? "gift-send/" + activeDay + "/" + presenter
+                : "dice-gift-send/" + activeDay + "/" + diceGiftKey)) {
             limit.blocked = true;
             log("免费虎粮", target, "跳过", "今日已经提交过该主播的赠送，不重复发送");
             handler.postDelayed(this::nextGiftRoom, 1200L);

@@ -4,7 +4,7 @@
     <string name="app_description">虎牙开屏、列表广告过滤及奖励广告跳过</string>
     <string name="dashboard_title">FuckAD</string>
     <string name="dashboard_subtitle">只为了干掉AD</string>
-    <string name="dashboard_version">v1.16</string>
+    <string name="dashboard_version">v1.17</string>
     <string name="status_checking">正在检测框架加载状态</string>
     <string name="status_ok">模块运行正常</string>
     <string name="status_loaded">LSPosed 已加载虎牙模块</string>
@@ -29,6 +29,14 @@
     <string name="feature_vip_ads_desc">按会员逻辑过滤指定推广</string>
     <string name="feature_4k">4K 观赛（实验）</string>
     <string name="feature_4k_desc">实际画质仍受服务端限制</string>
+    <string name="default_quality_title">默认直播清晰度</string>
+    <string name="default_quality_desc">进直播间自动选择；当前清晰度不可用时回退到虎牙原逻辑</string>
+    <string name="default_quality_picker">选择默认清晰度</string>
+    <string name="quality_follow">跟随虎牙</string>
+    <string name="quality_smooth">流畅</string>
+    <string name="quality_super">超清</string>
+    <string name="quality_bluray">蓝光</string>
+    <string name="quality_value_format">%1$s  ›</string>
     <string name="copy_diagnostics">复制版本信息</string>
     <string name="copied_diagnostics">已复制版本信息</string>
     <string name="guide_title">使用说明</string>

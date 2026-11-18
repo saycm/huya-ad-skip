@@ -2,18 +2,22 @@ package io.github.saycm.huya.skipad;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.content.SharedPreferences;
 
 import org.json.JSONObject;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.libxposed.api.XposedModule;
@@ -37,8 +41,18 @@ public final class HuyaCompatEntry extends XposedModule {
     private static final AtomicInteger AMS_REQUESTS = new AtomicInteger();
     private static final AtomicInteger AMS_SESSIONS = new AtomicInteger();
     private static final AtomicInteger AWARD_CALLS = new AtomicInteger();
+    private static final long RATE_BATCH_GAP_MS = 1500L;
+    private static final long RATE_CACHE_TTL_MS = 60000L;
 
     private static Handler mainHandler;
+    private final Object rateLock = new Object();
+    private final Map<Integer, String> recentBitrates = new LinkedHashMap<>();
+    private final AtomicInteger qualityApplyGeneration = new AtomicInteger();
+    private long lastBitrateSeenAt;
+    private volatile String qualityLogKey = "";
+    private volatile String lastAppliedQualityKey = "";
+    private volatile int lastLoggedCurrentBitrate = Integer.MIN_VALUE;
+    private volatile long lastQualityApplyAt;
     private boolean hooksInitialized;
     private boolean activityLoaderHookInstalled;
     private SharedPreferences prefs;
@@ -123,6 +137,7 @@ public final class HuyaCompatEntry extends XposedModule {
         }
         hooksInitialized = true;
         logInfo("initializing with activity loader " + classLoader);
+        hookDefaultQuality(classLoader);
         boolean ads = isEnabled(GlassSettings.KEY_ADS);
         boolean liveCards = isEnabled(GlassSettings.KEY_LIVE_CARDS);
         boolean rewards = isEnabled(GlassSettings.KEY_REWARDS);
@@ -135,6 +150,7 @@ public final class HuyaCompatEntry extends XposedModule {
         hookAwardRequests(classLoader);
         hookAdRequestDiagnostics(classLoader);
         if (ads) {
+            hookStartupGuide(classLoader);
             hookDisplayAds(classLoader);
             hookImmerseFeedAds(classLoader);
             hookListAds(classLoader);
@@ -153,6 +169,280 @@ public final class HuyaCompatEntry extends XposedModule {
 
     private boolean isEnabled(String key) {
         return prefs == null || prefs.getBoolean(key, true);
+    }
+
+    private void hookDefaultQuality(ClassLoader classLoader) {
+        try {
+            Class<?> infoType = classLoader.loadClass(
+                    "com.duowan.kiwi.live.model.MultiBitrateInfo");
+            Method getBitrate = infoType.getMethod("getBitrate");
+            Method getDisplayName = infoType.getMethod("getDisplayName");
+            for (Constructor<?> constructor : infoType.getDeclaredConstructors()) {
+                hook(constructor).intercept(chain -> {
+                    Object result = chain.proceed();
+                    Object bitrate = getBitrate.invoke(result);
+                    if (bitrate instanceof Number) {
+                        Object name = getDisplayName.invoke(result);
+                        rememberBitrate(
+                                ((Number) bitrate).intValue(),
+                                name == null ? null : String.valueOf(name));
+                    }
+                    return result;
+                });
+            }
+
+            Class<?> cacheType = classLoader.loadClass(
+                    "com.duowan.kiwi.live.multiline.cache.MultiRateDataCache");
+            installQualityHook(
+                    cacheType.getDeclaredMethod("getSaveBitrate", long.class));
+            installQualityHook(
+                    cacheType.getDeclaredMethod("getSaveBitrate", long.class, int.class));
+            installQualityHook(
+                    cacheType.getDeclaredMethod(
+                            "getSaveRealBitrate", long.class, int.class));
+
+            Class<?> streamConfigType = classLoader.loadClass(
+                    "com.huya.sdk.newapi.HYPlayer.HYLiveStreamConfig");
+            installStreamConfigQualityHook(
+                    classLoader,
+                    streamConfigType.getDeclaredMethod("setMemoryBitrate", int.class));
+            installStreamConfigQualityHook(
+                    classLoader,
+                    streamConfigType.getDeclaredMethod("setDefaultBitrate", int.class));
+            installStreamConfigQualityHook(
+                    classLoader,
+                    streamConfigType.getDeclaredMethod("setRecommendBitrate", int.class));
+
+            Class<?> ratePanelType = classLoader.loadClass(
+                    "com.duowan.kiwi.live.panel.recyclerview.BasePortraitMultiStreamPanel");
+            Method ratePanelUpdate = ratePanelType.getDeclaredMethod(
+                    "doRateUpdate", List.class, int.class);
+            hook(ratePanelUpdate).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+                int preferred = prefs == null ? -1
+                        : prefs.getInt(GlassSettings.KEY_LIVE_QUALITY, -1);
+                Object items = chain.getArg(0);
+                if (preferred == LiveQuality.FOLLOW
+                        || !(items instanceof List)
+                        || !(chain.getArg(1) instanceof Number)) {
+                    return chain.proceed();
+                }
+                Map<Integer, String> available = new LinkedHashMap<>();
+                for (Object item : (List<?>) items) {
+                    try {
+                        Object bitrate = getBitrate.invoke(item);
+                        if (bitrate instanceof Number) {
+                            Object name = getDisplayName.invoke(item);
+                            available.put(
+                                    ((Number) bitrate).intValue(),
+                                    name == null ? null : String.valueOf(name));
+                        }
+                    } catch (Throwable ignored) {
+                        // Keep only rates whose public model accessor works.
+                    }
+                }
+                replaceBitrates(available);
+                int original = ((Number) chain.getArg(1)).intValue();
+                int selected = LiveQuality.select(preferred, original, available);
+                logInfo("live quality panel original=" + original
+                        + " selected=" + selected + " available=" + available);
+                if (selected != original) {
+                    scheduleQualityApply(classLoader, preferred);
+                }
+                return selected == original
+                        ? chain.proceed()
+                        : chain.proceed(new Object[]{items, selected});
+            });
+
+            Class<?> playerType = classLoader.loadClass(
+                    "com.duowan.kiwi.player.MultiVideoPlayer");
+            hook(playerType.getDeclaredMethod("getCurrentBitrate")).intercept(chain -> {
+                Object result = chain.proceed();
+                if (result instanceof Number) {
+                    int current = ((Number) result).intValue();
+                    if (current != lastLoggedCurrentBitrate) {
+                        lastLoggedCurrentBitrate = current;
+                        logInfo("current live bitrate=" + current);
+                    }
+                }
+                return result;
+            });
+
+            Class<?> channelType = classLoader.loadClass(
+                    "com.duowan.kiwi.liveroom.ChannelPage");
+            hook(channelType.getDeclaredMethod("onCreate", android.os.Bundle.class))
+                    .intercept(chain -> {
+                        resetQualitySession();
+                        return chain.proceed();
+                    });
+            hook(channelType.getDeclaredMethod(
+                            "onNewIntent", android.content.Intent.class))
+                    .intercept(chain -> {
+                        resetQualitySession();
+                        return chain.proceed();
+                    });
+            logInfo("hooked default live quality");
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+    }
+
+    private void resetQualitySession() {
+        lastAppliedQualityKey = "";
+        qualityApplyGeneration.incrementAndGet();
+        synchronized (rateLock) {
+            recentBitrates.clear();
+            lastBitrateSeenAt = 0L;
+        }
+    }
+
+    private void installQualityHook(Method method) {
+        hook(method).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+            Object original = chain.proceed();
+            int preferred = prefs == null ? -1
+                    : prefs.getInt(GlassSettings.KEY_LIVE_QUALITY, -1);
+            if (preferred == LiveQuality.FOLLOW) {
+                return original;
+            }
+            int originalBitrate = ((Number) original).intValue();
+            Map<Integer, String> available = availableQualities();
+            int selected = LiveQuality.select(
+                    preferred, originalBitrate, available);
+            String logKey = method.getName() + ":" + preferred + ":"
+                    + originalBitrate + ":" + selected;
+            if (!logKey.equals(qualityLogKey)) {
+                qualityLogKey = logKey;
+                logInfo("default quality via " + method.getName()
+                        + " preferred=" + preferred
+                        + " original=" + originalBitrate
+                        + " selected=" + selected
+                        + " available=" + available);
+            }
+            return selected;
+        });
+    }
+
+    private void installStreamConfigQualityHook(ClassLoader classLoader, Method method) {
+        hook(method).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
+            Object value = chain.getArg(0);
+            int preferred = prefs == null ? -1
+                    : prefs.getInt(GlassSettings.KEY_LIVE_QUALITY, -1);
+            if (preferred == LiveQuality.FOLLOW || !(value instanceof Number)) {
+                return chain.proceed();
+            }
+            int original = ((Number) value).intValue();
+            int selected = LiveQuality.select(
+                    preferred, original, availableQualities());
+            String logKey = method.getName() + ":" + preferred + ":"
+                    + original + ":" + selected;
+            if (!logKey.equals(qualityLogKey)) {
+                qualityLogKey = logKey;
+                logInfo("default quality stream config via " + method.getName()
+                        + " preferred=" + preferred
+                        + " original=" + original
+                        + " selected=" + selected
+                        + " available=" + availableBitrates());
+            }
+            Object result = selected == original
+                    ? chain.proceed()
+                    : chain.proceed(new Object[]{selected});
+            scheduleQualityApply(classLoader, preferred);
+            return result;
+        });
+    }
+
+    private void scheduleQualityApply(ClassLoader classLoader, int preferred) {
+        int generation = qualityApplyGeneration.incrementAndGet();
+        getMainHandler().postDelayed(
+                () -> applyConfiguredQuality(classLoader, preferred, generation), 1800L);
+    }
+
+    private void applyConfiguredQuality(
+            ClassLoader classLoader, int preferred, int generation) {
+        if (generation != qualityApplyGeneration.get()) {
+            return;
+        }
+        int currentPreference = prefs == null
+                ? -1 : prefs.getInt(GlassSettings.KEY_LIVE_QUALITY, -1);
+        if (currentPreference != preferred) {
+            return;
+        }
+
+        Map<Integer, String> available = availableQualities();
+        int selected = LiveQuality.select(preferred, -1, available);
+        if (selected < 0) {
+            logInfo("default quality switch skipped; no playable bitrate available="
+                    + available);
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastQualityApplyAt < RATE_BATCH_GAP_MS) {
+            return;
+        }
+
+        try {
+            Class<?> componentType = classLoader.loadClass(
+                    "com.duowan.kiwi.live.api.ILiveComponent");
+            Object component = classLoader.loadClass("ryxq.xxe")
+                    .getDeclaredMethod("i", Class.class)
+                    .invoke(null, componentType);
+            Object module = componentType.getMethod("getMultiLineModule")
+                    .invoke(component);
+            Class<?> moduleType = classLoader.loadClass(
+                    "com.duowan.kiwi.live.api.multiline.IMultiLineModule");
+            int lineIndex = ((Number) moduleType.getMethod("getLineIndex")
+                    .invoke(module)).intValue();
+            String applyKey = lineIndex + ":" + selected + ":" + available;
+            if (applyKey.equals(lastAppliedQualityKey)) {
+                return;
+            }
+            moduleType.getMethod(
+                            "switchLineTo", int.class, int.class, boolean.class)
+                    .invoke(module, lineIndex, selected, true);
+            lastQualityApplyAt = now;
+            lastAppliedQualityKey = applyKey;
+            logInfo("requested default quality switch line=" + lineIndex
+                    + " selected=" + selected + " available=" + available);
+        } catch (Throwable throwable) {
+            logFailure(throwable);
+        }
+    }
+
+    private void rememberBitrate(int bitrate, String displayName) {
+        if (bitrate < 0) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        synchronized (rateLock) {
+            if (now - lastBitrateSeenAt > RATE_BATCH_GAP_MS) {
+                recentBitrates.clear();
+            }
+            recentBitrates.put(bitrate, displayName);
+            lastBitrateSeenAt = now;
+        }
+    }
+
+    private void replaceBitrates(Map<Integer, String> bitrates) {
+        long now = SystemClock.elapsedRealtime();
+        synchronized (rateLock) {
+            recentBitrates.clear();
+            recentBitrates.putAll(bitrates);
+            lastBitrateSeenAt = now;
+        }
+    }
+
+    private Map<Integer, String> availableQualities() {
+        long now = SystemClock.elapsedRealtime();
+        synchronized (rateLock) {
+            if (now - lastBitrateSeenAt > RATE_CACHE_TTL_MS) {
+                recentBitrates.clear();
+            }
+            return new LinkedHashMap<>(recentBitrates);
+        }
+    }
+
+    private Set<Integer> availableBitrates() {
+        return availableQualities().keySet();
     }
 
     private void hookVipAdFilter(ClassLoader classLoader) {
@@ -395,11 +685,16 @@ public final class HuyaCompatEntry extends XposedModule {
             Method create = findMethod(type, "createFloatWindowItemView", 5);
             if (create != null) {
                 hook(create).setPriority(PRIORITY_HIGHEST).intercept(chain -> {
-                    Object id = field(chain.getArg(2), "iEntId");
+                    Object entry = chain.getArg(2);
+                    Object id = field(entry, "iEntId");
                     // Huya's gift offer, game promotion and shopping activity windows.
                     if (Integer.valueOf(317).equals(id) || Integer.valueOf(201).equals(id)
                             || Integer.valueOf(175).equals(id)) {
                         logInfo("blocked promotional live-room window before creation");
+                        return null;
+                    }
+                    if (Integer.valueOf(497).equals(id)) {
+                        logInfo("blocked All-Star live-room activity card before creation");
                         return null;
                     }
                     return chain.proceed();
@@ -601,6 +896,20 @@ public final class HuyaCompatEntry extends XposedModule {
         } catch (Throwable throwable) {
             Log.w(TAG, "init failed", throwable);
             logFailure(throwable);
+        }
+    }
+
+    private void hookStartupGuide(ClassLoader classLoader) {
+        try {
+            Class<?> type = classLoader.loadClass("ryxq.weg");
+            // Preserve initialization and the original dialog-close event path.
+            hook(type.getDeclaredMethod("shouldShowGuideDialog", boolean.class))
+                    .intercept(chain -> chain.proceed(new Object[]{false}));
+            hook(type.getDeclaredMethod("shouldShowGuideDialog"))
+                    .intercept(chain -> false);
+            logInfo("hooked startup guide display");
+        } catch (Throwable failure) {
+            logFailure(failure);
         }
     }
 

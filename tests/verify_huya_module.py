@@ -61,8 +61,8 @@ def main() -> None:
     assert 'package="io.github.saycm.huya.skipad"' in manifest
     assert "io.github.libxposed.service.XposedProvider" in manifest
     assert "io.github.saycm.huya.skipad.XposedService" in manifest
-    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "17"
-    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.16"
+    assert run(str(APKANALYZER), "manifest", "version-code", str(args.module)).strip() == "18"
+    assert run(str(APKANALYZER), "manifest", "version-name", str(args.module)).strip() == "1.17"
     assert "xposedmodule" not in manifest
     assert "xposedminversion" not in manifest
 
@@ -70,6 +70,8 @@ def main() -> None:
     assert ENTRY.replace(".", "/") in defined or "io.github.saycm.huya.skipad" in defined
     assert "io.github.libxposed.service.XposedService" in defined
     assert "io.github.libxposed.service.XposedProvider" in defined
+    for name in ("TaskWire", "NativeTaskCatalog", "NativeTaskRunner", "HuyaTaskClient", "NativeTaskAutomation"):
+        assert "io.github.saycm.huya.skipad." + name in defined, f"missing task class {name}"
     assert not re.search(r"^C\s+d\s+.*\tde\.robv\.android\.xposed", defined, re.MULTILINE), \
         "module contains legacy Xposed classes"
     assert not re.search(r"^C\s+d\s+.*\tio\.github\.libxposed\.api", defined, re.MULTILINE), \
@@ -177,6 +179,19 @@ def main() -> None:
     assert ".method public dismissWhenError(Ljava/lang/String;)V" in splash_code
 
     display_interfaces = {
+        "ryxq.ev6": (
+            ".method public static a(Lcom/duowan/jce/wup/UniPacket;IILjava/lang/Number;"
+            "Lcom/huya/kiwi/crossplatform/common/wup/HybridJceCallback;)Lryxq/ev6;",
+        ),
+        "com.huya.kiwi.crossplatform.common.wup.HybridJceCallback": (
+            ".method public abstract onResponse([B)V",
+            ".method public abstract onTraceId(Ljava/lang/String;)V",
+            ".method public abstract a(Lryxq/zu6;)V",
+        ),
+        "com.duowan.jce.wup.UniPacket": (
+            ".method public constructor <init>()V",
+            ".method public decode([B)V",
+        ),
         "com.duowan.kiwi.popup.impl.pubscreen.PopupStrategyConditionHelper": (
             ".method public final checkPlatformVipFilter(Lcom/duowan/kiwi/popup/api/PopupItem;)Z",
         ),

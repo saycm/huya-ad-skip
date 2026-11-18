@@ -19,18 +19,26 @@ public final class TaskLogProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
-        helper = new SQLiteOpenHelper(getContext(), "daily_tasks.db", null, 2) {
+        helper = new SQLiteOpenHelper(getContext(), "daily_tasks.db", null, 4) {
             @Override public void onCreate(SQLiteDatabase db) {
                 db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                         + "time INTEGER NOT NULL, task TEXT NOT NULL, target TEXT NOT NULL, "
                         + "state TEXT NOT NULL, detail TEXT NOT NULL, origin TEXT)");
                 db.execSQL("CREATE UNIQUE INDEX events_origin ON events(origin)");
+                createTasks(db);
             }
             @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
                 if (oldVersion < 2) {
                     db.execSQL("ALTER TABLE events ADD COLUMN origin TEXT");
                     db.execSQL("CREATE UNIQUE INDEX events_origin ON events(origin)");
                 }
+                if (oldVersion < 3) createTasks(db);
+                if (oldVersion < 4) db.delete("tasks", null, null);
+            }
+            private void createTasks(SQLiteDatabase db) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS tasks (task_key TEXT PRIMARY KEY, "
+                        + "title TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, "
+                        + "updated INTEGER NOT NULL, sort_order INTEGER NOT NULL)");
             }
         };
         return true;
@@ -70,6 +78,32 @@ public final class TaskLogProvider extends ContentProvider {
             }
             getContext().getSharedPreferences("task_log_display", 0).edit()
                     .putLong("last_sync", System.currentTimeMillis()).apply();
+        } else if ("import_tasks".equals(method)) {
+            ArrayList<Bundle> incoming = extras == null ? null : extras.getParcelableArrayList("tasks");
+            if (incoming == null || incoming.size() > 300) throw new IllegalArgumentException("Invalid task batch");
+            db.beginTransaction();
+            try {
+                db.delete("tasks", null, null);
+                for (int index = 0; index < incoming.size(); index++) {
+                    Bundle entry = incoming.get(index);
+                    if (entry.getInt("catalog_version", 0) != NativeTaskCatalog.VERSION) continue;
+                    String key = entry.getString("key", "");
+                    if (key.isEmpty() || key.length() > 160) continue;
+                    ContentValues row = new ContentValues();
+                    row.put("task_key", key);
+                    row.put("title", bounded(entry.getString("title", "")));
+                    row.put("status", bounded(entry.getString("status", "")));
+                    row.put("detail", bounded(entry.getString("detail", "")));
+                    row.put("updated", entry.getLong("updated"));
+                    row.put("sort_order", index);
+                    db.insertWithOnConflict("tasks", null, row, SQLiteDatabase.CONFLICT_REPLACE);
+                }
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+            getContext().getSharedPreferences("task_log_display", 0).edit()
+                    .putLong("last_tasks_sync", System.currentTimeMillis()).apply();
         } else if ("read".equals(method)) {
             if (!owner) throw new SecurityException("Only module can read logs");
             ArrayList<Bundle> entries = new ArrayList<>();
@@ -88,6 +122,24 @@ public final class TaskLogProvider extends ContentProvider {
             result.putParcelableArrayList("events", entries);
             result.putLong("last_sync", getContext().getSharedPreferences("task_log_display", 0)
                     .getLong("last_sync", 0));
+        } else if ("read_tasks".equals(method)) {
+            if (!owner) throw new SecurityException("Only module can read task catalog");
+            ArrayList<Bundle> entries = new ArrayList<>();
+            try (Cursor rows = db.rawQuery("SELECT task_key, title, status, detail, updated "
+                    + "FROM tasks ORDER BY sort_order", null)) {
+                while (rows.moveToNext()) {
+                    Bundle entry = new Bundle();
+                    entry.putString("key", rows.getString(0));
+                    entry.putString("title", rows.getString(1));
+                    entry.putString("status", rows.getString(2));
+                    entry.putString("detail", rows.getString(3));
+                    entry.putLong("updated", rows.getLong(4));
+                    entries.add(entry);
+                }
+            }
+            result.putParcelableArrayList("tasks", entries);
+            result.putLong("last_sync", getContext().getSharedPreferences("task_log_display", 0)
+                    .getLong("last_tasks_sync", 0));
         } else if ("clear".equals(method)) {
             if (!owner) throw new SecurityException("Only module can clear logs");
             getContext().getSharedPreferences("task_log_display", 0).edit()
@@ -97,6 +149,10 @@ public final class TaskLogProvider extends ContentProvider {
             throw new IllegalArgumentException("Unknown action");
         }
         return result;
+    }
+
+    private static String bounded(String value) {
+        return value.substring(0, Math.min(value.length(), 400));
     }
 
     @Override public Cursor query(Uri uri, String[] p, String s, String[] a, String o) {

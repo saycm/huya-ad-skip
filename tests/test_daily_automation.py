@@ -24,6 +24,7 @@ public class Bundle {
  public void putLong(String key,long value){values.put(key,value);}
  public long getLong(String key){return (Long)values.get(key);}
  public void putParcelableArrayList(String key,java.util.ArrayList<?> value){values.put(key,value);}
+ public java.util.ArrayList getParcelableArrayList(String key){return (java.util.ArrayList)values.get(key);}
 }
 ''',
     # Only the URI constant is required by the engine. The actual provider is
@@ -65,8 +66,7 @@ public class ContentResolver {
   if(delaySync){entered.countDown();try{release.await();}catch(InterruptedException e){throw new RuntimeException(e);}}
   if(blocked)throw new IllegalStateException("Module process must remain stopped");
   Bundle result=new Bundle();
-  if("claim".equals(method))result.putBoolean("claimed",claims.add(arg));
-  if("append".equals(method))events.add(row);
+  if("import".equals(method)&&row!=null)events.addAll(row.getParcelableArrayList("events"));
   return result;
  }
 }
@@ -95,13 +95,20 @@ public class IntentFilter {public IntentFilter(String action){}}
     "io/github/saycm/huya/skipad/LocalTaskStore.java": '''package io.github.saycm.huya.skipad;
 import android.os.Bundle;import android.content.*;import java.util.*;
 final class LocalTaskStore {
- LocalTaskStore(Context context){}
+ static final List<Bundle> localEvents=new ArrayList<>();
+ final Runnable onAppend;
+ LocalTaskStore(Context context){this(context,null);}
+ LocalTaskStore(Context context,Runnable onAppend){this.onAppend=onAppend;}
  boolean claim(String key){return ContentResolver.claims.add(key);}
  void append(String task,String target,String state,String detail){
   Bundle row=new Bundle();row.putString("task",task);row.putString("target",target);
-  row.putString("state",state);row.putString("detail",detail);ContentResolver.events.add(row);
+  row.putString("state",state);row.putString("detail",detail);localEvents.add(row);
+  if(onAppend!=null)onAppend.run();
  }
- ArrayList<Bundle> events(){return new ArrayList<>(ContentResolver.events);}
+ void replaceTasks(List<NativeTaskCatalog.Task> tasks){if(onAppend!=null)onAppend.run();}
+ void replaceDiceTasks(List<DiceTaskCatalog.Task> tasks){if(onAppend!=null)onAppend.run();}
+ ArrayList<Bundle> events(){return new ArrayList<>(localEvents);}
+ ArrayList<Bundle> tasks(){return new ArrayList<>();}
 }
 ''',
     "com/duowan/taf/jce/JceStruct.java": '''package com.duowan.taf.jce;public class JceStruct {}
@@ -198,14 +205,26 @@ public class InputBarWupFunction {
 import android.content.*;import android.os.*;import java.lang.reflect.*;
 import io.github.libxposed.api.XposedModule;import ryxq.*;
 public class DailyEngineTest {
- static boolean has(String state){return ContentResolver.events.stream().anyMatch(x->state.equals(x.getString("state","")));}
+ static boolean has(String state){return LocalTaskStore.localEvents.stream().anyMatch(x->state.equals(x.getString("state","")));}
+ static void awaitProvider(String state)throws Exception{
+  long end=System.currentTimeMillis()+3000;
+  while(System.currentTimeMillis()<end){
+   if(ContentResolver.events.stream().anyMatch(x->state.equals(x.getString("state",""))))return;
+   Thread.sleep(10);
+  }
+  throw new AssertionError("Provider never received state: "+state);
+ }
  public static void main(String[] args) throws Throwable {
-  boolean enabled=!"disabled".equals(args[0])&&!"sync-storm".equals(args[0]);
+  boolean enabled=!"disabled".equals(args[0])&&!"sync-storm".equals(args[0])
+    &&!"auto-sync".equals(args[0])&&!"sync-during".equals(args[0])&&!args[0].startsWith("dice-");
+  if("sync-storm".equals(args[0])||"sync-during".equals(args[0]))ContentResolver.delaySync=true;
   if("module-stopped".equals(args[0]))ContentResolver.blocked=true;
   if("logout".equals(args[0]))xxe.uid=0;
   if("timeout".equals(args[0]))TestServer.drop=true;
   SharedPreferences prefs=(SharedPreferences)Proxy.newProxyInstance(DailyEngineTest.class.getClassLoader(),
    new Class<?>[]{SharedPreferences.class},(proxy,method,values)->{
+    if("native-failure".equals(args[0])&&"getBoolean".equals(method.getName())
+      &&GlassSettings.KEY_NATIVE_TASKS.equals(values[0]))throw new IllegalStateException("task center preferences unavailable");
     if("getBoolean".equals(method.getName()))return enabled&&GlassSettings.KEY_AUTO_SIGN.equals(values[0]);
     if("getString".equals(method.getName()))return "";
     throw new AssertionError("Unexpected preference access");
@@ -214,8 +233,33 @@ public class DailyEngineTest {
   DailyAutomation engine=new DailyAutomation(module,prefs,DailyEngineTest.class.getClassLoader());
   engine.onOpen(context);Handler.advance(40000);
   int lists=TestServer.lists,signs=TestServer.signs;
+  if(args[0].startsWith("dice-")){
+   if(args[0].equals("dice-busy")){
+    Field busy=DailyAutomation.class.getDeclaredField("giftActive");busy.setAccessible(true);busy.setBoolean(engine,true);
+   }
+   int[] calls={0};boolean[] accepted={false};
+   engine.sendDiceGrain(xxe.uid,"2099-01-01",55,"single-test-operation",
+    ()->!args[0].equals("dice-off"),(ok,detail)->{calls[0]++;accepted[0]=ok;});
+   Handler.advance(100000);
+   if(calls[0]!=1||accepted[0])throw new AssertionError("disabled/busy/unavailable gift incorrectly completed");
+   if(TestServer.lists!=0||TestServer.signs!=0)throw new AssertionError("dice gift ran other daily tasks");
+   return;
+  }
+  if("auto-sync".equals(args[0])){
+   awaitProvider("跳过");
+   return;
+  }
+  if("sync-during".equals(args[0])){
+   if(!ContentResolver.entered.await(2,java.util.concurrent.TimeUnit.SECONDS))
+    throw new AssertionError("automatic sync never started");
+   Method write=DailyAutomation.class.getDeclaredMethod("log",String.class,String.class,String.class,String.class);
+   write.setAccessible(true);
+   write.invoke(engine,"同步测试","","同步后新增","同步进行中追加");
+   ContentResolver.release.countDown();
+   awaitProvider("同步后新增");
+   return;
+  }
   if("sync-storm".equals(args[0])){
-   ContentResolver.delaySync=true;
    Intent sync=new Intent(DailyAutomation.SYNC_LOGS);
    Context.receiver.onReceive(context,sync);
    try{
@@ -228,9 +272,9 @@ public class DailyEngineTest {
    }finally{ContentResolver.release.countDown();}
    return;
   }
-  if("success".equals(args[0])||"module-stopped".equals(args[0])){
+  if("success".equals(args[0])||"module-stopped".equals(args[0])||"native-failure".equals(args[0])){
    if(lists!=1||signs!=2||!has("成功")||!has("未完成"))throw new AssertionError("sign results");
-   long confirmed=ContentResolver.events.stream().filter(x->"粉丝牌打卡".equals(x.getString("task",""))
+   long confirmed=LocalTaskStore.localEvents.stream().filter(x->"粉丝牌打卡".equals(x.getString("task",""))
      &&"成功".equals(x.getString("state",""))).count();
    if(confirmed!=1)throw new AssertionError("failed response marked successful");
    engine.onOpen(context);Handler.advance(40000);
@@ -273,7 +317,9 @@ class DailyAutomationTest(unittest.TestCase):
                 capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            for case in ("success", "disabled", "logout", "timeout", "module-stopped", "sync-storm"):
+            for case in ("success", "disabled", "logout", "timeout", "module-stopped", "auto-sync",
+                         "sync-during", "sync-storm", "native-failure",
+                         "dice-off", "dice-busy", "dice-unavailable"):
                 with self.subTest(case=case):
                     result = subprocess.run(
                         [str(JDK / "bin" / ("java" + EXE)), "-cp",

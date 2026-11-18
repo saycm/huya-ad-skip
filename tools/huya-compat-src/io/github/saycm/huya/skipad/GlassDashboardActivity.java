@@ -19,6 +19,7 @@ public final class GlassDashboardActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_glass_dashboard);
+        SystemBarInsets.apply(findViewById(android.R.id.content));
 
         boolean installed = packageInstalled("com.duowan.kiwi");
         TextView appStatus = (TextView) findViewById(R.id.app_status);

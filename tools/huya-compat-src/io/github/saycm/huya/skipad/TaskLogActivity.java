@@ -3,12 +3,15 @@ package io.github.saycm.huya.skipad;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -20,86 +23,128 @@ import java.util.Date;
 import java.util.Locale;
 
 public final class TaskLogActivity extends Activity {
+    private static final long SYNC_POLL_MS = 250L;
+    private static final long SYNC_TIMEOUT_MS = 6000L;
     private LinearLayout logs;
-    private Button all;
-    private Button issues;
+    private TextView all;
+    private TextView issues;
     private boolean onlyIssues;
     private TextView syncStatus;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable afterSync = this::renderLogs;
+    private final Runnable pollSync = this::pollSync;
+    private long syncBaseline;
+    private long syncStartedAt;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundResource(R.drawable.dashboard_background);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(Color.rgb(245, 246, 248));
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
-        root.setPadding(pad, pad, pad, pad);
         scroll.addView(root);
         setContentView(scroll);
+        SystemBarInsets.apply(findViewById(android.R.id.content));
+
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView back = text("‹ 返回", 16, R.color.huya_accent);
+        header.setPadding(dp(18), dp(10), dp(12), dp(10));
+        header.setBackgroundColor(Color.WHITE);
+        TextView back = text("‹", 28, R.color.huya_accent);
         back.setGravity(Gravity.CENTER_VERTICAL);
+        back.setMinWidth(dp(38));
         back.setMinHeight(dp(48));
         back.setOnClickListener(view -> finish());
         header.addView(back);
-        TextView title = text("任务日志", 22, R.color.glass_text);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text("任务日志", 21, R.color.glass_text);
         title.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-2, -2);
-        titleParams.leftMargin = dp(18);
-        header.addView(title, titleParams);
-        root.addView(header);
+        heading.addView(title);
+        syncStatus = text("等待同步", 12, R.color.glass_secondary);
+        syncStatus.setPadding(0, dp(2), 0, 0);
+        heading.addView(syncStatus);
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(0, -2, 1);
+        headingParams.leftMargin = dp(4);
+        header.addView(heading, headingParams);
 
-        LinearLayout guide = card(root);
-        TextView caption = text("每一步，都有记录", 17, R.color.glass_text);
-        caption.setTypeface(null, Typeface.BOLD);
-        guide.addView(caption);
-        TextView note = text("日志仅保存在本机。可查看任务是否触发，以及每个粉丝牌、直播间的执行结果。", 13, R.color.glass_secondary);
-        note.setPadding(0, dp(8), 0, dp(8));
-        guide.addView(note);
-        guide.addView(text("“请求已发出”仍需等待回执，没有后续记录表示结果尚未确认。", 13, R.color.glass_secondary));
-        syncStatus = text("打开虎牙后，可在这里同步最新日志。", 12, R.color.huya_accent);
-        syncStatus.setPadding(0, dp(10), 0, 0);
-        guide.addView(syncStatus);
-
-        LinearLayout actions = row(root);
-        Button refresh = button("刷新日志", true);
+        Button refresh = action("刷新");
         refresh.setOnClickListener(view -> refreshLogs());
-        actions.addView(refresh, weighted(false));
-        Button clear = button("清空记录", false);
+        header.addView(refresh);
+        Button clear = action("清空");
         clear.setOnClickListener(view -> new AlertDialog.Builder(this,
                 android.R.style.Theme_Material_Light_Dialog_Alert)
                 .setMessage("清空日志不会重置今日执行记录，也不会重复打卡或送礼。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清空", (dialog, which) -> {
                     getContentResolver().call(TaskLogProvider.URI, "clear", null, null);
-                    refreshLogs();
+                    renderLogs();
                 }).show());
-        actions.addView(clear, weighted(true));
-        LinearLayout filters = row(root);
-        all = button("全部记录", true);
-        issues = button("异常与跳过", false);
-        all.setOnClickListener(view -> { onlyIssues = false; refreshLogs(); });
-        issues.setOnClickListener(view -> { onlyIssues = true; refreshLogs(); });
-        filters.addView(all, weighted(false));
-        filters.addView(issues, weighted(true));
+        header.addView(clear);
+        root.addView(header);
+
+        LinearLayout filters = new LinearLayout(this);
+        filters.setGravity(Gravity.CENTER_VERTICAL);
+        filters.setPadding(dp(18), dp(10), dp(18), dp(10));
+        all = filter("全部", true);
+        issues = filter("异常与跳过", false);
+        all.setOnClickListener(view -> { onlyIssues = false; renderLogs(); });
+        issues.setOnClickListener(view -> { onlyIssues = true; renderLogs(); });
+        filters.addView(all);
+        LinearLayout.LayoutParams issueParams = new LinearLayout.LayoutParams(-2, dp(34));
+        issueParams.leftMargin = dp(8);
+        filters.addView(issues, issueParams);
+        filters.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        TextView explain = text("仅保存在本机", 12, R.color.glass_secondary);
+        filters.addView(explain);
+        root.addView(filters);
+
         logs = new LinearLayout(this);
         logs.setOrientation(LinearLayout.VERTICAL);
-        root.addView(logs);
+        logs.setBackground(rounded(Color.WHITE, 14));
+        logs.setClipToOutline(true);
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, -2);
+        listParams.leftMargin = dp(16);
+        listParams.rightMargin = dp(16);
+        root.addView(logs, listParams);
+
+        TextView footnote = text("保留最近 500 条，页面最多显示 300 条", 12, R.color.glass_secondary);
+        footnote.setGravity(Gravity.CENTER);
+        footnote.setPadding(dp(16), dp(16), dp(16), dp(24));
+        root.addView(footnote);
         refreshLogs();
     }
 
     private void refreshLogs() {
+        syncBaseline = lastSync();
+        syncStartedAt = SystemClock.uptimeMillis();
         sendBroadcast(new Intent(DailyAutomation.SYNC_LOGS).setPackage("com.duowan.kiwi"));
         renderLogs();
-        handler.removeCallbacks(afterSync);
-        handler.postDelayed(afterSync, 900L);
+        handler.removeCallbacks(pollSync);
+        handler.postDelayed(pollSync, SYNC_POLL_MS);
+    }
+
+    private void pollSync() {
+        if (lastSync() > syncBaseline) {
+            renderLogs();
+            return;
+        }
+        if (SystemClock.uptimeMillis() - syncStartedAt < SYNC_TIMEOUT_MS) {
+            handler.postDelayed(pollSync, SYNC_POLL_MS);
+            return;
+        }
+        renderLogs();
+        syncStatus.setText("尚未完成同步，请确认虎牙正在运行；未同步的任务记录仍保留在本机。");
+    }
+
+    private long lastSync() {
+        Bundle result = getContentResolver().call(TaskLogProvider.URI, "read", null, null);
+        return result == null ? 0 : result.getLong("last_sync", 0);
     }
 
     @Override protected void onDestroy() {
-        handler.removeCallbacks(afterSync);
+        handler.removeCallbacks(pollSync);
         super.onDestroy();
     }
 
@@ -107,64 +152,82 @@ public final class TaskLogActivity extends Activity {
         Bundle result = getContentResolver().call(TaskLogProvider.URI, "read", null, null);
         ArrayList<Bundle> entries = result == null ? null : result.getParcelableArrayList("events");
         logs.removeAllViews();
-        styleButton(all, !onlyIssues);
-        styleButton(issues, onlyIssues);
+        styleFilter(all, !onlyIssues);
+        styleFilter(issues, onlyIssues);
         SimpleDateFormat time = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA);
         long synced = result == null ? 0 : result.getLong("last_sync", 0);
-        syncStatus.setText(synced == 0 ? "等待同步：请先打开虎牙，再刷新日志。"
-                : "上次同步 " + time.format(new Date(synced)) + "；虎牙未运行时显示已同步的记录。");
+        syncStatus.setText(synced == 0 ? "等待虎牙同步"
+                : "上次同步 " + time.format(new Date(synced)));
         int visible = 0;
         if (entries != null) for (Bundle entry : entries) {
             String state = entry.getString("state", "");
             boolean issue = isIssue(state);
             if (onlyIssues && !issue) continue;
+            if (visible > 0) logs.addView(divider());
             visible++;
-            LinearLayout item = card(logs);
-            LinearLayout heading = new LinearLayout(this);
-            heading.setGravity(Gravity.CENTER_VERTICAL);
-            TextView task = text(entry.getString("task", ""), 16, R.color.glass_text);
-            task.setTypeface(null, Typeface.BOLD);
-            heading.addView(task, new LinearLayout.LayoutParams(0, -2, 1));
-            int color = ("成功".equals(state) || "已打卡".equals(state)) ? getColor(R.color.success_green)
-                    : issue ? getColor(R.color.warning_amber) : getColor(R.color.huya_accent);
-            TextView badge = text(state, 12, R.color.glass_text);
-            badge.setTextColor(color);
-            badge.setPadding(dp(10), dp(5), dp(10), dp(5));
-            GradientDrawable fill = new GradientDrawable();
-            fill.setColor((color & 0x00ffffff) | 0x18000000);
-            fill.setCornerRadius(dp(12));
-            badge.setBackground(fill);
-            heading.addView(badge);
-            item.addView(heading);
-            TextView stamp = text(time.format(new Date(entry.getLong("time"))), 12, R.color.glass_secondary);
-            stamp.setPadding(0, dp(6), 0, dp(8));
-            item.addView(stamp);
-            String target = entry.getString("target", "");
-            if (!target.isEmpty()) {
-                TextView room = text(target, 14, R.color.glass_text);
-                room.setPadding(0, 0, 0, dp(6));
-                item.addView(room);
-            }
-            TextView detail = text(entry.getString("detail", ""), 14, R.color.glass_secondary);
-            detail.setTextIsSelectable(true);
-            item.addView(detail);
+            logs.addView(logRow(entry, state, issue, time));
         }
-        if (visible == 0) {
-            LinearLayout empty = card(logs);
-            empty.addView(text(onlyIssues ? "暂无异常或跳过记录" : "还没有任务记录", 17, R.color.glass_text));
-            TextView hint = text(onlyIssues ? "可切换到全部记录查看执行过程。"
-                    : "打开虎牙后，回到这里查看任务触发及执行结果。", 14, R.color.glass_secondary);
-            hint.setPadding(0, dp(8), 0, 0);
-            empty.addView(hint);
-        }
-        TextView footnote = text("仅保留本机最近 500 条 · 当前最多显示 300 条", 12, R.color.glass_secondary);
-        footnote.setPadding(dp(4), dp(16), 0, dp(12));
-        logs.addView(footnote);
+        if (visible == 0) logs.addView(emptyRow());
+    }
+
+    private LinearLayout logRow(Bundle entry, String state, boolean issue, SimpleDateFormat time) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setPadding(dp(16), dp(14), dp(16), dp(14));
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView task = text(entry.getString("task", ""), 15, R.color.glass_text);
+        task.setTypeface(null, Typeface.BOLD);
+        heading.addView(task, new LinearLayout.LayoutParams(0, -2, 1));
+        int color = ("成功".equals(state) || "已打卡".equals(state))
+                ? R.color.success_green : issue ? R.color.warning_amber : R.color.huya_accent;
+        TextView badge = text(state, 12, color);
+        badge.setTypeface(null, Typeface.BOLD);
+        heading.addView(badge);
+        item.addView(heading);
+
+        String target = entry.getString("target", "");
+        String meta = time.format(new Date(entry.getLong("time")))
+                + (target.isEmpty() ? "" : " · " + target);
+        TextView stamp = text(meta, 12, R.color.glass_secondary);
+        stamp.setPadding(0, dp(4), 0, dp(6));
+        item.addView(stamp);
+
+        TextView detail = text(entry.getString("detail", ""), 13, R.color.glass_text);
+        detail.setTextIsSelectable(true);
+        item.addView(detail);
+        return item;
+    }
+
+    private LinearLayout emptyRow() {
+        LinearLayout empty = new LinearLayout(this);
+        empty.setOrientation(LinearLayout.VERTICAL);
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(dp(18), dp(34), dp(18), dp(34));
+        TextView title = text(onlyIssues ? "暂无异常" : "暂无任务记录", 16, R.color.glass_text);
+        title.setTypeface(null, Typeface.BOLD);
+        empty.addView(title);
+        TextView hint = text(onlyIssues ? "切换到“全部”查看完整记录。"
+                : "任务执行后，记录会显示在这里。", 13, R.color.glass_secondary);
+        hint.setPadding(0, dp(6), 0, 0);
+        empty.addView(hint);
+        return empty;
+    }
+
+    private View divider() {
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.rgb(238, 239, 243));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(1));
+        params.leftMargin = dp(16);
+        params.rightMargin = dp(16);
+        divider.setLayoutParams(params);
+        return divider;
     }
 
     private boolean isIssue(String state) {
         return "失败".equals(state) || "未完成".equals(state) || "结果未确认".equals(state)
-                || "未执行".equals(state)
+                || "服务端未确认".equals(state) || "未执行".equals(state)
                 || "跳过".equals(state) || "阻止发送".equals(state)
                 || "取消".equals(state) || "停止".equals(state);
     }
@@ -178,43 +241,42 @@ public final class TaskLogActivity extends Activity {
         return view;
     }
 
-    private LinearLayout card(LinearLayout parent) {
-        LinearLayout view = new LinearLayout(this);
-        view.setOrientation(LinearLayout.VERTICAL);
-        view.setPadding(dp(16), dp(16), dp(16), dp(16));
-        view.setBackgroundResource(R.drawable.glass_card);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(14);
-        parent.addView(view, params);
-        return view;
-    }
-
-    private LinearLayout row(LinearLayout parent) {
-        LinearLayout view = new LinearLayout(this);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
-        params.topMargin = dp(14);
-        parent.addView(view, params);
-        return view;
-    }
-
-    private LinearLayout.LayoutParams weighted(boolean inset) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(46), 1);
-        if (inset) params.leftMargin = dp(10);
-        return params;
-    }
-
-    private Button button(String title, boolean active) {
+    private Button action(String title) {
         Button view = new Button(this);
         view.setText(title);
-        view.setTextSize(14);
+        view.setTextSize(13);
         view.setAllCaps(false);
-        styleButton(view, active);
+        view.setTextColor(getColor(R.color.huya_accent));
+        view.setBackgroundColor(Color.TRANSPARENT);
+        view.setStateListAnimator(null);
+        view.setMinWidth(0);
+        view.setMinimumWidth(0);
+        view.setMinHeight(dp(40));
+        view.setMinimumHeight(dp(40));
+        view.setPadding(dp(8), 0, dp(8), 0);
         return view;
     }
 
-    private void styleButton(Button view, boolean active) {
-        view.setBackgroundResource(active ? R.drawable.accent_button : R.drawable.glass_card);
-        view.setTextColor(getColor(active ? R.color.hero_text : R.color.huya_accent));
+    private TextView filter(String title, boolean active) {
+        TextView view = text(title, 13, active ? R.color.huya_accent : R.color.glass_secondary);
+        view.setGravity(Gravity.CENTER);
+        view.setMinHeight(dp(34));
+        view.setPadding(dp(12), 0, dp(12), 0);
+        styleFilter(view, active);
+        return view;
+    }
+
+    private void styleFilter(TextView view, boolean active) {
+        view.setTextColor(getColor(active ? R.color.huya_accent : R.color.glass_secondary));
+        view.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
+        view.setBackground(rounded(active ? 0x167C6AF0 : Color.TRANSPARENT, 17));
+    }
+
+    private GradientDrawable rounded(int color, int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }

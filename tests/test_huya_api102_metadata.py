@@ -56,8 +56,8 @@ class HuyaApi102MetadataTest(unittest.TestCase):
             (MODULE_DIR / "res/mipmap-xxxhdpi/ic_launcher.png").is_file(),
             "launcher icon is missing",
         )
-        self.assertIn('android:versionCode="17"', manifest)
-        self.assertIn('android:versionName="1.16"', manifest)
+        self.assertIn('android:versionCode="18"', manifest)
+        self.assertIn('android:versionName="1.17"', manifest)
         self.assertIn('android:name=".GlassDashboardActivity"', manifest)
         self.assertIn('android:name=".AppDetailActivity"', manifest)
         self.assertIn('android:theme="@style/GlassDashboard"', manifest)
@@ -166,6 +166,52 @@ class HuyaApi102MetadataTest(unittest.TestCase):
         for key in ("ads", "live_cards", "rewards", "vip_ads", "vip_4k"):
             self.assertIn(f"KEY_{key.upper()}", settings_text)
             self.assertIn(f"GlassSettings.KEY_{key.upper()}", detail_text)
+
+    def test_native_task_catalog_has_per_task_switches_and_cross_process_sync(self):
+        panel = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/AutomationPanel.java"
+        ).read_text(encoding="utf-8")
+        provider = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/TaskLogProvider.java"
+        ).read_text(encoding="utf-8")
+        store = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/LocalTaskStore.java"
+        ).read_text(encoding="utf-8")
+        runner = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/NativeTaskRunner.java"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"read_tasks"', provider)
+        self.assertIn('"import_tasks"', provider)
+        self.assertIn("replaceTasks", store)
+        self.assertIn("taskEnabled", runner)
+        self.assertIn("host.publish(catalog)", runner)
+        self.assertIn("NativeTaskCatalog.switchKey", panel)
+        self.assertIn("TaskLogProvider.URI", panel)
+        self.assertIn("任务开关已关闭", runner)
+        self.assertNotIn('claim("task-center-native-actions-v1/', runner)
+
+    def test_log_page_waits_for_sync_revision_instead_of_one_fixed_delay(self):
+        activity = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/TaskLogActivity.java"
+        ).read_text(encoding="utf-8")
+        self.assertIn("lastSync() > syncBaseline", activity)
+        self.assertIn("SYNC_POLL_MS", activity)
+        self.assertIn("SYNC_TIMEOUT_MS", activity)
+        self.assertNotIn("postDelayed(afterSync, 900L)", activity)
+
+    def test_log_page_uses_compact_rows_instead_of_individual_glass_cards(self):
+        activity = (
+            ROOT
+            / "tools/huya-compat-src/io/github/saycm/huya/skipad/TaskLogActivity.java"
+        ).read_text(encoding="utf-8")
+        self.assertIn("private LinearLayout logRow", activity)
+        self.assertIn("private View divider", activity)
+        self.assertNotIn("LinearLayout item = card(logs);", activity)
 
     def test_glass_dashboard_build_resolves_generated_resources(self):
         build_script = (ROOT / "tools/build.py").read_text(encoding="utf-8")
