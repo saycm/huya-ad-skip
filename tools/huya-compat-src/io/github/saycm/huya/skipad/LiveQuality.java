@@ -59,7 +59,7 @@ public final class LiveQuality {
                 selectedMegabits = megabits;
             }
         }
-        return found ? selected : highestBlueRay(available.keySet());
+        return found ? selected : -1;
     }
 
     private static boolean isBlueRay(String name) {

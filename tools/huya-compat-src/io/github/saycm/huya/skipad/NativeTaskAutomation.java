@@ -39,6 +39,28 @@ final class NativeTaskAutomation {
         if (prefs == null) return;
         String date = currentDate();
         if (!seen.add(account + "/" + date)) return;
+        if (prefs.getBoolean(GlassSettings.KEY_DICE_WELFARE_SIGN, false)) {
+            new WelfareSignRunner(new WelfareSignRunner.Host() {
+                @Override public boolean active() {
+                    try {
+                        return date.equals(currentDate())
+                                && prefs.getBoolean(GlassSettings.KEY_DICE_WELFARE_SIGN, false)
+                                && client.loggedInUid() == account;
+                    } catch (ReflectiveOperationException | RuntimeException failure) { return false; }
+                }
+                @Override public boolean claim() {
+                    try { return store.claim("dice-welfare-sign/" + account + "/" + date); }
+                    catch (RuntimeException failure) { return false; }
+                }
+                @Override public void log(String state, String detail) {
+                    NativeTaskAutomation.this.log("任务中心签到", state, detail);
+                }
+                @Override public void send(TaskWire.Struct request, NativeTaskRunner.Reply reply) {
+                    client.send(account, "wupui", "executeUserSign", request,
+                            (body, code) -> handler.post(() -> reply.complete(body, code)));
+                }
+            }, () -> {}).start();
+        }
         int interval;
         try { interval = NativeTaskCatalog.intervalSeconds(prefs.getString(GlassSettings.KEY_TASK_INTERVAL, "30")); }
         catch (IllegalArgumentException failure) { log("配置", "失败", "执行间隔无效，本轮未执行"); return; }

@@ -295,11 +295,14 @@ public class weg {
 
 for automation_class in ("DailyAutomation", "TaskLogProvider", "AutomationRules", "LocalTaskStore",
                          "NativeTaskAutomation", "NativeTaskRunner", "NativeTaskCatalog", "TaskWire", "HuyaTaskClient",
-                         "DiceTaskRunner", "DiceTaskCatalog", "DiceMissionRunner"):
+                         "DiceTaskRunner", "DiceTaskCatalog", "DiceMissionRunner", "WelfareSignRunner"):
     automation_path = f"io/github/saycm/huya/skipad/{automation_class}.java"
     SOURCES[automation_path] = (ROOT / "tools/huya-compat-src" / automation_path).read_text(encoding="utf-8")
 SOURCES["io/github/saycm/huya/skipad/LiveQuality.java"] = (
     ROOT / "tools/huya-compat-src/io/github/saycm/huya/skipad/LiveQuality.java"
+).read_text(encoding="utf-8")
+SOURCES["io/github/saycm/huya/skipad/QualitySession.java"] = (
+    ROOT / "tools/huya-compat-src/io/github/saycm/huya/skipad/QualitySession.java"
 ).read_text(encoding="utf-8")
 
 

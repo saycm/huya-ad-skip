@@ -214,6 +214,7 @@ final class HuyaTaskClient {
             boolean dice = "wupui".equals(servant)
                     && ("getJumpGameModule".equals(function)
                     || "getCommAdPannel".equals(function)
+                    || "executeUserSign".equals(function)
                     || "getJumpGameTaskList".equals(function)
                     || "claimJumpGameTaskReward".equals(function)
                     || "rollJumpGameDice".equals(function));

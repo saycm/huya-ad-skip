@@ -70,6 +70,11 @@ public final class LiveQualityTest {
   onlyZeroBlueRay.put(500,"流畅");
   check(LiveQuality.select(LiveQuality.BLUE_RAY,2000,onlyZeroBlueRay),
    0,"A room with only Blue-ray 20M must not fall back to Super HD");
+  Map<Integer,String> noBlueRay = new LinkedHashMap<>();
+  noBlueRay.put(20000,"4K");
+  noBlueRay.put(2000,"超清");
+  check(LiveQuality.select(LiveQuality.BLUE_RAY,2000,noBlueRay),
+   2000,"A room without Blue-ray must retain Huya's quality");
  }
 }
 """,
@@ -151,17 +156,9 @@ public final class LiveQualityTest {
         self.assertIn("GlassSettings.KEY_LIVE_QUALITY", activity)
         self.assertIn("hookDefaultQuality", entry)
         self.assertIn("GlassSettings.KEY_LIVE_QUALITY", entry)
-        self.assertIn("getSaveBitrate", entry)
-        self.assertIn("getSaveRealBitrate", entry)
         self.assertIn("getDisplayName", entry)
         self.assertIn("LinkedHashMap", entry)
-        self.assertIn("availableQualities", entry)
-        self.assertIn("setMemoryBitrate", entry)
-        self.assertIn("setDefaultBitrate", entry)
-        self.assertIn("setRecommendBitrate", entry)
-        self.assertIn("MultiVideoPlayer", entry)
         self.assertIn("BasePortraitMultiStreamPanel", entry)
-        self.assertIn("doRateUpdate", entry)
         self.assertIn("ILiveComponent", entry)
         self.assertIn("getMultiLineModule", entry)
         self.assertIn("getLineIndex", entry)
@@ -169,11 +166,7 @@ public final class LiveQualityTest {
         self.assertIn("LiveQuality.select", entry)
         self.assertIn("preferred == LiveQuality.FOLLOW", entry)
         self.assertNotIn("preferred < 0", entry)
-        self.assertIn("if (selected != original) {", entry)
-        self.assertIn("resetQualitySession", entry)
-        self.assertIn("lastAppliedQualityKey", entry)
         self.assertIn("ChannelPage", entry)
-        self.assertIn("recentBitrates.clear()", entry)
 
 
 if __name__ == "__main__":

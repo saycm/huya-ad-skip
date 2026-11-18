@@ -31,6 +31,7 @@ final class AutomationPanel {
     private Switch nativeTasks;
     private Switch dice;
     private Switch diceMissions;
+    private Switch welfareSign;
     private final boolean dicePage;
     private LinearLayout taskList;
     private TextView taskSummary;
@@ -52,6 +53,7 @@ final class AutomationPanel {
             dice = toggle(root, "每日自动投骰子", GlassSettings.KEY_AUTO_DICE);
             label(root, "每天首次打开虎牙后，按执行间隔使用已有免费骰子，不购买次数。", 13);
             diceMissions = toggle(root, "执行骰子任务及领取奖励", GlassSettings.KEY_DICE_MISSIONS);
+            welfareSign = toggle(root, "任务中心每日签到", GlassSettings.KEY_DICE_WELFARE_SIGN);
             label(root, "请开启已适配任务。未适配项会注明原因并关闭开关；修改后强制停止虎牙再打开。", 13);
             label(root, "送虎粮 · 自定义优先直播间", 17);
             label(root, "按列表顺序，每次赠送 1 个免费虎粮并复核进度。数量为骰子任务每日赠送上限，与二级页赠送独立；未配置不送礼。", 13);
@@ -112,6 +114,7 @@ final class AutomationPanel {
             if (nativeTasks != null) nativeTasks.setChecked(remote.getBoolean(GlassSettings.KEY_NATIVE_TASKS, false));
             if (dice != null) dice.setChecked(remote.getBoolean(GlassSettings.KEY_AUTO_DICE, false));
             if (diceMissions != null) diceMissions.setChecked(remote.getBoolean(GlassSettings.KEY_DICE_MISSIONS, false));
+            if (welfareSign != null) welfareSign.setChecked(remote.getBoolean(GlassSettings.KEY_DICE_WELFARE_SIGN, false));
             syncing = false;
             if (sign != null) sign.setEnabled(true);
             if (gift != null) gift.setEnabled(true);
@@ -119,6 +122,7 @@ final class AutomationPanel {
             if (nativeTasks != null) nativeTasks.setEnabled(true);
             if (dice != null) dice.setEnabled(true);
             if (diceMissions != null) diceMissions.setEnabled(true);
+            if (welfareSign != null) welfareSign.setEnabled(true);
             if (interval != null) { interval.setEnabled(true); showInterval(); }
             if (followTarget != null) { followTarget.setEnabled(true); showFollowTarget(); }
             if (refreshTasks != null) { refreshTasks.setEnabled(true); syncTasks(); }
