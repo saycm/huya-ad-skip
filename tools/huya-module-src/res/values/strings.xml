@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FuckAD</string>
+    <string name="migration_title">模块已迁移至虎牙 plus</string>
+    <string name="migration_message">新模块：虎牙 plus\n新包名：io.github.saycm.huyaplus\n更新地址：%1$s\n\n安装后，请在 LSPosed 中停用 FuckAD，启用虎牙 plus 并重新勾选「虎牙直播」，然后重启虎牙。</string>
+    <string name="migration_url" translatable="false">https://github.com/Xposed-Modules-Repo/io.github.saycm.huyaplus/releases/latest</string>
+    <string name="migration_open">打开更新地址</string>
+    <string name="migration_no_browser">请在浏览器中打开弹窗里的更新地址</string>
     <string name="app_description">虎牙开屏、列表广告过滤及奖励广告跳过</string>
     <string name="dashboard_title">FuckAD</string>
     <string name="dashboard_subtitle">只为了干掉AD</string>

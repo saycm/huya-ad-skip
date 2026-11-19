@@ -1,6 +1,8 @@
 package io.github.saycm.huya.skipad;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -9,6 +11,7 @@ import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public final class GlassDashboardActivity extends Activity {
     private static final long DETECT_TIMEOUT_MS = 4000L;
@@ -33,6 +36,26 @@ public final class GlassDashboardActivity extends Activity {
         bindLink(R.id.community_discussion_row, R.string.discussion_url);
 
         checkFrameworkState();
+        if (savedInstanceState == null) showMigrationNotice();
+    }
+
+    private void showMigrationNotice() {
+        String url = getString(R.string.migration_url);
+        AlertDialog notice = new AlertDialog.Builder(this)
+                .setTitle(R.string.migration_title)
+                .setMessage(getString(R.string.migration_message, url))
+                .setNegativeButton(android.R.string.ok, null)
+                .setPositiveButton(R.string.migration_open, null)
+                .create();
+        notice.show();
+        notice.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                notice.dismiss();
+            } catch (ActivityNotFoundException unavailable) {
+                Toast.makeText(this, R.string.migration_no_browser, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void checkFrameworkState() {
